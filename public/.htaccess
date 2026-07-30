@@ -1,0 +1,17 @@
+Options -Indexes -MultiViews
+RewriteEngine On
+
+# If request is for a real file or directory, don't rewrite
+RewriteCond %{REQUEST_FILENAME} -d [OR]
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule ^ - [L]
+
+# Admin panel clean URLs
+RewriteRule ^admin/?$ ../admin/login.php [L,NC,QSA]
+RewriteRule ^admin/(login|logout|register)/?$ ../admin/$1.php [L,NC,QSA]
+RewriteRule ^admin/([a-zA-Z0-9_-]+)/?$ ../admin/pages/$1.php [L,NC,QSA]
+
+# Security: Block direct access to config and data files
+<FilesMatch "^(db\.php|.*\.ini|.*\.log|.*\.ht.*)$">
+    Require all denied
+</FilesMatch>
