@@ -1,15 +1,18 @@
 -- MistikAI Sample Data (Demo)
 -- Import after schema.sql
+--
+-- No admin user is created here. After importing, open /admin/kurulum.php
+-- (first-run setup) to create the first full admin with your own password.
 
+SET NAMES utf8mb4;
 START TRANSACTION;
 
--- System Settings
+-- System Settings (adding admins from the panel is closed by default)
 INSERT INTO `bot_sistem_ayarlari` (`ayar_adi`, `ayar_degeri`) VALUES
-('admin_kayit_acik', '1');
-
--- Default Admin (password: 'admin123' - CHANGE IN PRODUCTION)
-INSERT INTO `bot_admin_users` (`kullanici_adi`, `sifre`, `ad_soyad`) VALUES
-('admin', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'Demo Admin');
+('admin_kayit_acik', '0'),
+('yemekhane_url', 'https://www.osmaniye.edu.tr/yemekmenu'),
+('takvim_url', 'https://www.osmaniye.edu.tr/tr/lisansustu/menuler/ogrenci/genel/47321-akademik-takvim')
+ON DUPLICATE KEY UPDATE `ayar_degeri` = VALUES(`ayar_degeri`);
 
 -- Faculty
 INSERT INTO `bot_fakulteler` (`id`, `ad`, `kod`) VALUES
@@ -110,7 +113,3 @@ INSERT INTO `bot_akis_butonlari` (`ust_menu_id`, `buton_metni`, `aksiyon_tipi`, 
 (1, 'ðŸ“… Akademik takvimi gÃ¶ster', 'modul', 'akademik_takvim', 3);
 
 COMMIT;
--- Sistem Ayarlarý Varsayýlanlarý
-INSERT INTO ot_sistem_ayarlari (yar_adi, yar_degeri) VALUES
-('yemekhane_url', 'https://www.osmaniye.edu.tr/yemekmenu'),
-('takvim_url', 'https://www.osmaniye.edu.tr/tr/lisansustu/menuler/ogrenci/genel/47321-akademik-takvim');

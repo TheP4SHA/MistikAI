@@ -34,3 +34,28 @@ global $GROQ_API_KEY, $BERT_API_URL;
 
 $GROQ_API_KEY = 'gsk_your_groq_api_key_here';  // Get from: https://console.groq.com
 $BERT_API_URL = 'http://localhost:8005/niyet-algila'; // Your BERT model endpoint (optional)
+$BERT_API_KEY = '';  // Optional shared secret sent as X-Api-Key to the BERT service
+
+// ======================================================================
+// Application & Security Settings
+// ======================================================================
+global $BERT_API_KEY, $BASE_PATH, $ADMIN_KOD_EDITORU, $GUVENILIR_VEKILLER, $IP_TUZU,
+       $LLM_MODEL, $LLM_YEDEK_MODEL, $LLM_MAX_TOKENS, $DAKIKA_ISTEK_SINIRI, $MESAJ_MAX_UZUNLUK,
+       $LOG_SAKLAMA_GUN, $OKUL_BILGISI, $SCRAPER_IZINLI_HOSTLAR, $ADMIN_TEMIZ_URL;
+
+$BASE_PATH = '';               // URL prefix when installed in a sub-folder, e.g. '/MistikAI' (no trailing slash)
+$ADMIN_TEMIZ_URL = false;      // true: admin links use the .htaccess clean URLs (/admin/dashboard); false: direct files (/admin/pages/dashboard.php)
+$ADMIN_KOD_EDITORU = false;    // In-browser PHP module editor + SQL terminal. Keep false in production.
+$GUVENILIR_VEKILLER = [];      // Reverse-proxy IPs whose X-Forwarded-For header is trusted, e.g. ['127.0.0.1']
+$IP_TUZU = 'change-me-to-a-long-random-string'; // Logs and rate limit store a salted hash, not the raw IP (KVKK/GDPR)
+
+$LLM_MODEL = 'llama-3.3-70b-versatile';   // Primary Groq model (check console.groq.com for the current list)
+$LLM_YEDEK_MODEL = 'llama-3.1-8b-instant'; // Fallback when the primary is rate-limited or down
+$LLM_MAX_TOKENS = 400;
+
+$DAKIKA_ISTEK_SINIRI = 20;     // Chat requests per minute per client
+$MESAJ_MAX_UZUNLUK = 500;      // Max characters per chat message
+$LOG_SAKLAMA_GUN = 180;        // Chat logs older than this many days are deleted
+
+$OKUL_BILGISI = 'Osmaniye Meslek Yüksekokulu (OMYO)'; // Short description used in the LLM system prompt
+$SCRAPER_IZINLI_HOSTLAR = [];  // Hosts the content scraper may fetch, e.g. ['www.example.edu.tr']; empty = scraper disabled

@@ -1,104 +1,109 @@
 <?php
-// /data/admin/front/ders.php
+// admin/pages/ders.php - Ders programı: toplu metinden içe aktarma
+// Bir bölüm/sınıfın eski dersleri silinip yenileri tek veritabanı işleminde (transaction) yazılır;
+// bir satır bile hatalıysa hiçbir değişiklik kalıcı olmaz.
+require_once __DIR__ . '/../_baslat.php';
 
-// GÜVENLİK DUVARI: Oturum yoksa kodun 1 satır bile aşağı inmesine izin verme, direkt logine şutla!
-if (session_status() === PHP_SESSION_NONE) { session_start(); }
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: /OmyoWeb/MistikAI/admin/login");
-    exit;
-}
+const DERS_GUNLERI = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
 
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
-
-// 1. VERİTABANINA BAĞLAN (Kök Dizin Mantığı ve Canlı Sunucu Yedeği)
-$doc_root = $_SERVER['DOCUMENT_ROOT']; // /var/www/html/
-// YOL DÜZELTİLDİ: Artık fazladan MistikAI yok, doğrudan /data
-$base_path = $doc_root . '/OmyoWeb/MistikAI/data';
-$db_path = $base_path . '/config/db.php';
-
-if (file_exists($db_path)) {
-    require_once $db_path;
-} else {
-    // config/db.php yoksa canlı FOG sunucusuna zorla bağlan
-    try {
-        require_once __DIR__ . '/../../config/db.php';
-        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        die("Kritik Hata: Veritabanı bağlantısı kurulamadı. " . $e->getMessage());
+/** Gün adını standart yazıma çevirir ("pazartesi", "SALI", "Carsamba" → "Salı" ...); tanınmazsa null. */
+function gunStandart(string $gun): ?string {
+    $katla = function (string $s): string {
+        $s = mb_strtolower(str_replace(['İ', 'I'], ['i', 'ı'], trim($s)), 'UTF-8');
+        return strtr($s, ['ı' => 'i', 'ş' => 's', 'ğ' => 'g', 'ü' => 'u', 'ö' => 'o', 'ç' => 'c']);
+    };
+    $aranan = $katla($gun);
+    foreach (DERS_GUNLERI as $g) {
+        if ($katla($g) === $aranan) {
+            return $g;
+        }
     }
+    return null;
 }
-global $db;
+
+/** "9:15" / "09:15" → "09:15:00"; geçersizse null. */
+function saatStandart(string $saat): ?string {
+    if (!preg_match('/^(\d{1,2})[:.](\d{2})$/', trim($saat), $m) || (int)$m[1] > 23 || (int)$m[2] > 59) {
+        return null;
+    }
+    return sprintf('%02d:%02d:00', (int)$m[1], (int)$m[2]);
+}
 
 // ======================================================================
 // AJAX İŞLEMLERİ
 // ======================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    header('Content-Type: application/json; charset=utf-8');
 
-    // TOPLU METİN (KOMUT) KAYIT İŞLEMİ
+    // Toplu metin (komut) kaydı
     if ($_POST['action'] === 'save_bulk_command') {
-        try {
-            $bolum_id = (int)$_POST['bolum_id'];
-            $sinif = (int)$_POST['sinif'];
-            $payload = json_decode($_POST['payload'], true);
+        $bolum_id = (int)($_POST['bolum_id'] ?? 0);
+        $sinif = (int)($_POST['sinif'] ?? 0);
+        $payload = json_decode((string)($_POST['payload'] ?? ''), true);
 
-            if (empty($payload)) {
-                throw new Exception("Kaydedilecek geçerli bir ders bulunamadı. Lütfen formatı kontrol edin.");
-            }
-
-            // 1. ADIM: Bölüme ait Fakülte ID'sini bul (Veritabanı kısıtlamasını aşmak için)
-            $fak_stmt = $db->prepare("SELECT fakulte_id FROM bot_bolumler WHERE id = ?");
-            $fak_stmt->execute([$bolum_id]);
-            $fakulte_id = $fak_stmt->fetchColumn();
-
-            if (!$fakulte_id) {
-                // Eğer bolum_id'nin fakültesi yoksa manuel 1 vererek patlamasını önleyelim
-                $fakulte_id = 1; 
-            }
-
-            // 2. ADIM: Seçilen bölüm ve sınıfın eski derslerini sil
-            $db->prepare("DELETE FROM bot_ders_programi WHERE bolum_id = ? AND sinif = ?")->execute([$bolum_id, $sinif]);
-            
-            // 3. ADIM: Fakülte ID'sini de dahil ederek SQL sorgusunu hazırla
-            $ins = $db->prepare("INSERT INTO bot_ders_programi (bolum_id, fakulte_id, sinif, gun, baslangic_saati, bitis_saati, ders_adi, ogretim_uyesi, derslik) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            
-            $eklenen = 0;
-            foreach ($payload as $p) {
-                // Saat formatlarını veritabanına (TIME) uygun hale getir (Örn: 10:15 -> 10:15:00)
-                $baslangic = trim($p['baslangic']) . ':00';
-                $bitis = trim($p['bitis']) . ':00';
-
-                $ins->execute([
-                    $bolum_id, 
-                    $fakulte_id,
-                    $sinif, 
-                    trim($p['gun']), 
-                    $baslangic, 
-                    $bitis, 
-                    trim($p['ders_adi']), 
-                    trim($p['hoca']), 
-                    trim($p['mekan'])
-                ]);
-                $eklenen++;
-            }
-
-            echo json_encode(['success' => true, 'message' => "$eklenen adet ders $sinif. Sınıf programına başarıyla işlendi!"]);
-        } catch (Exception $e) { 
-            echo json_encode(['success' => false, 'message' => $e->getMessage()]); 
+        if (!is_array($payload) || !$payload) {
+            Panel::json(['success' => false, 'message' => 'Kaydedilecek geçerli bir ders bulunamadı. Lütfen formatı kontrol edin.']);
         }
-        exit;
+        if ($sinif < 1 || $sinif > 6) {
+            Panel::json(['success' => false, 'message' => 'Geçersiz sınıf.']);
+        }
+        $fak_stmt = $db->prepare("SELECT fakulte_id FROM bot_bolumler WHERE id = ?");
+        $fak_stmt->execute([$bolum_id]);
+        $fakulte_id = (int)$fak_stmt->fetchColumn();
+        if ($fakulte_id <= 0) {
+            Panel::json(['success' => false, 'message' => 'Seçilen bölüm bulunamadı.']);
+        }
+
+        // Önce tüm satırları doğrula; hata varsa veritabanına hiç dokunma.
+        $satirlar = [];
+        foreach (array_values($payload) as $n => $p) {
+            $sira = $n + 1;
+            if (!is_array($p)) {
+                Panel::json(['success' => false, 'message' => "$sira. ders okunamadı."]);
+            }
+            $gun = gunStandart((string)($p['gun'] ?? ''));
+            $bas = saatStandart((string)($p['baslangic'] ?? ''));
+            $bit = saatStandart((string)($p['bitis'] ?? ''));
+            $ders = trim((string)($p['ders_adi'] ?? ''));
+            $hoca = trim((string)($p['hoca'] ?? ''));
+            $mekan = trim((string)($p['mekan'] ?? ''));
+            if ($gun === null) {
+                Panel::json(['success' => false, 'message' => "$sira. derste gün tanınmadı (Pazartesi ... Pazar)."]);
+            }
+            if ($bas === null || $bit === null || $bas >= $bit) {
+                Panel::json(['success' => false, 'message' => "$sira. derste saat aralığı geçersiz (SS:DD - SS:DD)."]);
+            }
+            if ($ders === '' || mb_strlen($ders, 'UTF-8') > 255 || mb_strlen($hoca, 'UTF-8') > 255 || mb_strlen($mekan, 'UTF-8') > 255) {
+                Panel::json(['success' => false, 'message' => "$sira. derste ders adı boş ya da alanlardan biri 255 karakterden uzun."]);
+            }
+            $satirlar[] = [$bolum_id, $fakulte_id, $sinif, $gun, $bas, $bit, $ders, $hoca === '' ? null : $hoca, $mekan === '' ? null : $mekan];
+        }
+
+        try {
+            $db->beginTransaction();
+            $db->prepare("DELETE FROM bot_ders_programi WHERE bolum_id = ? AND sinif = ?")->execute([$bolum_id, $sinif]);
+            $ins = $db->prepare("INSERT INTO bot_ders_programi (bolum_id, fakulte_id, sinif, gun, baslangic_saati, bitis_saati, ders_adi, ogretim_uyesi, derslik) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            foreach ($satirlar as $satir) {
+                $ins->execute($satir);
+            }
+            $db->commit();
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) { $db->rollBack(); }
+            Panel::json(['success' => false, 'message' => Panel::hata($e, 'ders programı içe aktarma') . ' Mevcut program değiştirilmedi.']);
+        }
+        Panel::json(['success' => true, 'message' => count($satirlar) . " adet ders $sinif. Sınıf programına başarıyla işlendi!"]);
     }
 
-    // TEK KAYIT SİLME
+    // Tek kayıt silme
     if ($_POST['action'] === 'delete_item') {
-        $id = (int)$_POST['id'];
-        $db->prepare("DELETE FROM bot_ders_programi WHERE id = ?")->execute([$id]);
-        echo json_encode(['success' => true]);
-        exit;
+        try {
+            $db->prepare("DELETE FROM bot_ders_programi WHERE id = ?")->execute([(int)($_POST['id'] ?? 0)]);
+            Panel::json(['success' => true]);
+        } catch (Throwable $e) {
+            Panel::json(['success' => false, 'message' => Panel::hata($e, 'ders silme')]);
+        }
     }
+
+    Panel::json(['success' => false, 'message' => 'Bilinmeyen işlem.'], 400);
 }
 
 $page_title = "Command Center | Ders Programı";
@@ -147,9 +152,9 @@ ob_start();
     </div>
 
     <div class="hub-nav">
-        <a href="icerik?tab=yemek" class="hub-tab">🍱 YEMEKHANE</a>
-        <a href="icerik?tab=takvim" class="hub-tab">📅 AKADEMİK TAKVİM</a>
-        <a href="ders" class="hub-tab active">📚 DERS PROGRAMI</a>
+        <a href="<?php echo Guvenlik::e(Panel::url('icerik', ['tab' => 'yemek'])); ?>" class="hub-tab">🍱 YEMEKHANE</a>
+        <a href="<?php echo Guvenlik::e(Panel::url('icerik', ['tab' => 'takvim'])); ?>" class="hub-tab">📅 AKADEMİK TAKVİM</a>
+        <a href="<?php echo Guvenlik::e(Panel::url('ders')); ?>" class="hub-tab active">📚 DERS PROGRAMI</a>
     </div>
 
     <div class="card-pasha">
@@ -164,7 +169,7 @@ ob_start();
                     <select id="cmd_bolum" class="modern-input">
                         <?php 
                         $bolumler = $db->query("SELECT * FROM bot_bolumler ORDER BY ad")->fetchAll();
-                        foreach($bolumler as $b) echo "<option value='{$b['id']}'>{$b['ad']}</option>";
+                        foreach($bolumler as $b) echo '<option value="' . (int)$b['id'] . '">' . Guvenlik::e($b['ad']) . '</option>';
                         ?>
                     </select>
                 </div>
@@ -235,22 +240,22 @@ Günü: Pazartesi"></textarea>
                         <tr><td colspan="6" style="text-align:center; padding:30px; color:#666;">Sistemde kayıtlı ders bulunmuyor.</td></tr>
                     <?php else:
                         foreach($exist as $e): ?>
-                        <tr id="row_<?php echo $e['id']; ?>">
+                        <tr id="row_<?php echo (int)$e['id']; ?>">
                             <td>
-                                <div style="font-size:0.8rem; color:#888; margin-bottom:4px;"><?php echo mb_substr($e['bolum_adi'] ?? 'Bilinmiyor', 0, 25); ?>...</div>
-                                <span style="background:rgba(139,92,246,0.1); color:var(--accent-color); padding:3px 8px; border-radius:6px; font-weight:bold; font-size:0.75rem;"><?php echo $e['sinif']; ?>. SINIF</span>
+                                <div style="font-size:0.8rem; color:#888; margin-bottom:4px;"><?php echo Guvenlik::e(mb_substr($e['bolum_adi'] ?? 'Bilinmiyor', 0, 25, 'UTF-8')); ?>...</div>
+                                <span style="background:rgba(139,92,246,0.1); color:var(--accent-color); padding:3px 8px; border-radius:6px; font-weight:bold; font-size:0.75rem;"><?php echo (int)$e['sinif']; ?>. SINIF</span>
                             </td>
-                            <td style="font-weight:700; color:#ddd;"><?php echo $e['gun']; ?></td>
+                            <td style="font-weight:700; color:#ddd;"><?php echo Guvenlik::e($e['gun']); ?></td>
                             <td>
-                                <div style="color:var(--success-color); font-weight:bold; font-family:monospace;"><?php echo substr($e['baslangic_saati'],0,5); ?></div>
-                                <div style="color:var(--danger-color); font-weight:bold; font-family:monospace;"><?php echo substr($e['bitis_saati'],0,5); ?></div>
+                                <div style="color:var(--success-color); font-weight:bold; font-family:monospace;"><?php echo Guvenlik::e(substr($e['baslangic_saati'], 0, 5)); ?></div>
+                                <div style="color:var(--danger-color); font-weight:bold; font-family:monospace;"><?php echo Guvenlik::e(substr($e['bitis_saati'], 0, 5)); ?></div>
                             </td>
-                            <td><b style="font-size:1.05rem;"><?php echo htmlspecialchars($e['ders_adi']); ?></b></td>
+                            <td><b style="font-size:1.05rem;"><?php echo Guvenlik::e($e['ders_adi']); ?></b></td>
                             <td>
-                                <?php echo htmlspecialchars($e['ogretim_uyesi']); ?> 
-                                <?php if(!empty($e['derslik'])) echo "<br><small style='color:var(--text-muted);'><i class='fas fa-map-marker-alt'></i> ".htmlspecialchars($e['derslik'])."</small>"; ?>
+                                <?php echo Guvenlik::e($e['ogretim_uyesi']); ?> 
+                                <?php if(!empty($e['derslik'])) echo "<br><small style='color:var(--text-muted);'><i class='fas fa-map-marker-alt'></i> ".Guvenlik::e($e['derslik'])."</small>"; ?>
                             </td>
-                            <td style="text-align:right;"><button onclick="askDel(<?php echo $e['id']; ?>)" class="btn-pasha btn-pasha-danger"><i class="fas fa-trash"></i></button></td>
+                            <td style="text-align:right;"><button type="button" onclick="askDel(<?php echo (int)$e['id']; ?>)" class="btn-pasha btn-pasha-danger"><i class="fas fa-trash"></i></button></td>
                         </tr>
                         <?php endforeach; 
                     endif; ?>
@@ -312,17 +317,21 @@ function parseCommandText() {
     }
 
     const tbody = document.getElementById('previewTableBody');
-    tbody.innerHTML = '';
+    tbody.textContent = '';
     
+    // Önizleme DOM ile kurulur; yapıştırılan metin HTML olarak yorumlanmaz.
+    const hucre = (etiket, metin, stil) => { const el = document.createElement(etiket); el.textContent = metin; if (stil) el.style.cssText = stil; return el; };
     parsedData.forEach(d => {
-        tbody.innerHTML += `
-            <tr>
-                <td style="font-weight:bold;">${d.gun}</td>
-                <td><span style="color:var(--success-color); font-weight:bold;">${d.baslangic}</span> - <span style="color:var(--danger-color); font-weight:bold;">${d.bitis}</span></td>
-                <td><b>${d.ders_adi}</b></td>
-                <td>${d.hoca} <br> <small style="color:#aaa;">${d.mekan}</small></td>
-            </tr>
-        `;
+        const tr = document.createElement('tr');
+        tr.appendChild(hucre('td', d.gun, 'font-weight:bold;'));
+        const saat = document.createElement('td');
+        saat.append(hucre('span', d.baslangic, 'color:var(--success-color); font-weight:bold;'), ' - ', hucre('span', d.bitis, 'color:var(--danger-color); font-weight:bold;'));
+        tr.appendChild(saat);
+        const ders = document.createElement('td'); ders.appendChild(hucre('b', d.ders_adi)); tr.appendChild(ders);
+        const kisi = document.createElement('td');
+        kisi.append(d.hoca, document.createElement('br'), hucre('small', d.mekan, 'color:#aaa;'));
+        tr.appendChild(kisi);
+        tbody.appendChild(tr);
     });
 
     document.getElementById('previewArea').style.display = 'block';
@@ -343,8 +352,7 @@ async function saveParsedData() {
     fd.append('payload', JSON.stringify(parsedData));
 
     try {
-        const res = await fetch('ders', { method: 'POST', body: fd });
-        const data = await res.json();
+        const data = await MISTIK.istek('ders', fd);
         
         if(data.success) {
             alert(data.message);
@@ -363,19 +371,12 @@ let deleteTarget = null;
 function askDel(id) { deleteTarget = id; document.getElementById('mistikOverlay').style.display = 'flex'; }
 document.getElementById('delBtn').onclick = async () => {
     const fd = new FormData(); fd.append('action', 'delete_item'); fd.append('id', deleteTarget);
-    await fetch('ders', { method: 'POST', body: fd });
-    location.reload();
+    const data = await MISTIK.istek('ders', fd);
+    if (data.success) { location.reload(); } else { alert(data.message); }
 };
 </script>
 
 <?php 
 $page_content = ob_get_clean();
 
-// LAYOUT YOLU DÜZELTİLDİ
-$layout_path = $base_path . '/admin/layouts/master_layouts.php';
-if (file_exists($layout_path)) {
-    require_once $layout_path; 
-} else {
-    echo "HATA: Layout dosyası bulunamadı: " . $layout_path;
-}
-?>
+require_once __DIR__ . '/../layouts/master_layouts.php';

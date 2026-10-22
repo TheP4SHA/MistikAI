@@ -1,24 +1,30 @@
 <?php
-// /data/MistikAI/admin/layouts/master_layouts.php
+// admin/layouts/master_layouts.php - Panel iskeleti
+// Oturum, CSRF ve güvenlik başlıkları admin/_baslat.php'de halledilir; bu dosya yalnız sayfayı çizer.
+// Çağıran sayfa: $page_title, $active_menu, $page_content, isteğe bağlı $extra_css ve $extra_js.
 
-// Güvenlik Duvarı: Giriş yapmamış kişileri login sayfasına şutla!
-if (session_status() === PHP_SESSION_NONE) { session_start(); }
-if (!isset($_SESSION['admin_id'])) {
-    // YOL DÜZELTİLDİ: .htaccess kuralına göre doğrudan "admin" rotasına gönder
-    header("Location: /OmyoWeb/MistikAI/admin");
+if (!class_exists('Panel')) {
+    http_response_code(404);
     exit;
 }
-
-// YOL DÜZELTİLDİ: Sitedeki tüm linklerin .htaccess üzerinden doğru çalışması için BASE URL
-$base_url = '/OmyoWeb/MistikAI/admin'; 
+$aktif_kullanici = Panel::kullanici() ?? [];
+$active_menu = $active_menu ?? '';
+$menu_ogeleri = [
+    'dashboard' => ['dashboard', 'fa-home', 'Ana Ekran (Dashboard)'],
+    'logger'    => ['logger', 'fa-chart-pie', 'Blackbox (Log Analizi)'],
+    'moduller'  => ['modul', 'fa-robot', 'Modül / Niyet Yönetimi'],
+    'akis'      => ['akis', 'fa-project-diagram', 'Akış (Flow) Yönetimi'],
+    'icerik'    => ['icerik', 'fa-database', 'Dinamik İçerik'],
+    'ayarlar'   => ['ayarlar', 'fa-cogs', 'Sistem Ayarları'],
+];
 ?>
-
 <!DOCTYPE html>
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MistikAI | <?php echo isset($page_title) ? $page_title : 'Admin Panel'; ?></title>
+    <meta name="robots" content="noindex, nofollow">
+    <title>MistikAI | <?php echo Guvenlik::e($page_title ?? 'Admin Panel'); ?></title>
     
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -81,6 +87,37 @@ $base_url = '/OmyoWeb/MistikAI/admin';
         <?php if(isset($extra_css)) echo $extra_css; ?>
         
     </style>
+    <script>
+        // Panel ortak JS: CSRF jetonu, sayfa URL'leri ve tüm POST istekleri için tek yardımcı.
+        window.MISTIK = <?php echo Panel::jsAyarlari(); ?>;
+        MISTIK.url = function (sayfa, sorgu) {
+            let u = MISTIK.urller[sayfa];
+            if (sorgu) { u += (u.indexOf('?') === -1 ? '?' : '&') + new URLSearchParams(sorgu).toString(); }
+            return u;
+        };
+        // POST + X-CSRF-Token; yanıt her zaman {success, message, ...} nesnesi olarak döner.
+        MISTIK.istek = async function (sayfa, govde, sorgu) {
+            const yanit = await fetch(MISTIK.url(sayfa, sorgu), {
+                method: 'POST',
+                body: govde,
+                credentials: 'same-origin',
+                headers: { 'X-CSRF-Token': MISTIK.csrf, 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
+            });
+            try {
+                return await yanit.json();
+            } catch (e) {
+                return { success: false, message: 'Sunucudan geçersiz yanıt alındı (HTTP ' + yanit.status + ').' };
+            }
+        };
+        // Sunucu mesajını metin olarak (HTML yorumlanmadan) renkli gösterir.
+        MISTIK.mesaj = function (kutu, metin, basarili) {
+            kutu.textContent = '';
+            const s = document.createElement('span');
+            s.style.color = basarili ? 'var(--success-color)' : 'var(--danger-color)';
+            s.textContent = metin || '';
+            kutu.appendChild(s);
+        };
+    </script>
 </head>
 <body>
 
@@ -90,38 +127,28 @@ $base_url = '/OmyoWeb/MistikAI/admin';
             <h2>MistikAI Admin</h2>
         </div>
         
-       <nav class="nav-links">
-    <a href="<?php echo $base_url; ?>/dashboard" class="nav-item <?php echo ($active_menu === 'dashboard') ? 'active' : ''; ?>">
-        <i class="fas fa-home"></i> Ana Ekran (Dashboard)
-    </a>
-    <a href="<?php echo $base_url; ?>/logger" class="nav-item <?php echo ($active_menu === 'logger') ? 'active' : ''; ?>">
-        <i class="fas fa-chart-pie"></i> Blackbox (Log Analizi)
-    </a>
-    <a href="<?php echo $base_url; ?>/modul" class="nav-item <?php echo ($active_menu === 'moduller') ? 'active' : ''; ?>">
-        <i class="fas fa-robot"></i> Modül / Niyet Yönetimi
-    </a>
-    <a href="<?php echo $base_url; ?>/akis" class="nav-item <?php echo ($active_menu === 'akis') ? 'active' : ''; ?>">
-        <i class="fas fa-project-diagram"></i> Akış (Flow) Yönetimi
-    </a>
-    <a href="<?php echo $base_url; ?>/icerik" class="nav-item <?php echo ($active_menu === 'icerik') ? 'active' : ''; ?>">
-        <i class="fas fa-database"></i> Dinamik İçerik
-    </a>
-    <a href="<?php echo $base_url; ?>/ayarlar" class="nav-item <?php echo ($active_menu === 'ayarlar') ? 'active' : ''; ?>">
-        <i class="fas fa-cogs"></i> Sistem Ayarları
-    </a>
-</nav>
+        <nav class="nav-links">
+            <?php foreach ($menu_ogeleri as $anahtar => [$sayfa, $ikon, $etiket]): ?>
+            <a href="<?php echo Guvenlik::e(Panel::url($sayfa)); ?>" class="nav-item <?php echo $active_menu === $anahtar ? 'active' : ''; ?>">
+                <i class="fas <?php echo $ikon; ?>"></i> <?php echo Guvenlik::e($etiket); ?>
+            </a>
+            <?php endforeach; ?>
+        </nav>
         
         <div class="sidebar-footer">
             <div class="user-info">
                 <div class="user-avatar">
-                    <?php echo mb_substr(mb_strtoupper($_SESSION['admin_ad'] ?? 'A', 'UTF-8'), 0, 1); ?>
+                    <?php echo Guvenlik::e(mb_substr(mb_strtoupper($aktif_kullanici['ad_soyad'] ?? 'A', 'UTF-8'), 0, 1)); ?>
                 </div>
                 <div class="user-details">
-                    <span class="user-name"><?php echo htmlspecialchars($_SESSION['admin_ad'] ?? 'Yönetici'); ?></span>
-                    <span class="user-role">Sistem Yöneticisi</span>
+                    <span class="user-name"><?php echo Guvenlik::e($aktif_kullanici['ad_soyad'] ?? 'Yönetici'); ?></span>
+                    <span class="user-role"><?php echo Panel::tamYetkili() ? 'Tam Yetkili Yönetici' : 'Kısıtlı Yönetici'; ?></span>
                 </div>
             </div>
-            <a href="<?php echo $base_url; ?>/logout" class="btn-logout"><i class="fas fa-sign-out-alt"></i> Güvenli Çıkış</a>
+            <form method="POST" action="<?php echo Guvenlik::e(Panel::url('logout')); ?>">
+                <?php echo Guvenlik::csrfAlani(); ?>
+                <button type="submit" class="btn-logout" style="cursor:pointer;"><i class="fas fa-sign-out-alt"></i> Güvenli Çıkış</button>
+            </form>
         </div>
     </aside>
 
