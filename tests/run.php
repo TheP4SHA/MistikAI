@@ -131,7 +131,7 @@ function ornekEklentiDizini(): string {
         'pasif_modul' => '<?php return $this->response("PASIF CALISTI");',
         'yankili'     => '<?php echo "SIZINTI"; return $this->response("temiz cevap");',
         'bozuk'       => '<?php throw new RuntimeException("gizli ayrinti");',
-        'xss'         => '<?php return $this->response("<b>ok</b><img src=x onerror=alert(1)><script>alert(2)</script>", [["text" => "<i>Git</i>", "payload" => "javascript:alert(1)"], ["text" => "Site", "url" => "javascript:alert(1)"], ["text" => "Resmi", "url" => "https://omyo.edu.tr"]]);',
+        'xss'         => '<?php return $this->response("<b>ok</b><img src=x onerror=alert(1)><script>alert(2)</script>", [["text" => "<i>Git</i>", "payload" => "javascript:alert(1)"], ["text" => "Site", "url" => "javascript:alert(1)"], ["text" => "Resmi", "url" => "https://www.example.edu.tr"]]);',
         'eski_json'   => '<?php return json_encode(["reply" => "eski modül", "buttons" => [["text" => "Menü", "payload" => "flow_ana_menu"]]]);',
         'iki_adim'    => '<?php if ($bekleyen === null) { $this->bekle(["adim" => "isim"]); return $this->response("Kimi arıyorsun?"); } return $this->response("aranan:" . $raw_input . ":" . $bekleyen["adim"]);',
     ];
@@ -178,10 +178,10 @@ test('script etiketi içeriğiyle atılır', function () {
     icerir($c, '<b>ok</b>');
 });
 test('onerror gibi olay öznitelikleri atılır', function () {
-    $c = Guvenlik::temizHtml('<img src="https://ornek.edu.tr/a.png" onerror="alert(1)"><div onclick="x()">y</div>');
+    $c = Guvenlik::temizHtml('<img src="https://www.example.edu.tr/a.png" onerror="alert(1)"><div onclick="x()">y</div>');
     icermez($c, 'onerror');
     icermez($c, 'onclick');
-    icerir($c, 'src="https://ornek.edu.tr/a.png"');
+    icerir($c, 'src="https://www.example.edu.tr/a.png"');
 });
 test('javascript: bağlantısı atılır, metin kalır', function () {
     $c = Guvenlik::temizHtml('<a href="javascript:alert(1)">tıkla</a><a href=" JaVaScRiPt:alert(2)">iki</a>');
@@ -195,7 +195,7 @@ test("style içindeki url() atılır", function () {
 });
 test('img src yalnız https; target her zaman _blank + noopener', function () {
     icermez(Guvenlik::temizHtml('<img src="http://ornek.com/a.png">'), 'src=');
-    $a = Guvenlik::temizHtml('<a href="https://omyo.edu.tr" target="_self">x</a>');
+    $a = Guvenlik::temizHtml('<a href="https://www.example.edu.tr" target="_self">x</a>');
     icerir($a, 'target="_blank"');
     icerir($a, 'rel="noopener noreferrer"');
 });
@@ -336,7 +336,7 @@ test('modül HTML\'i ve butonları sunucuda süzülür', function () {
     icerir($c->metin, '<b>ok</b>');
     icermez($c->metin, 'onerror');
     icermez($c->metin, '<script');
-    esit([['text' => 'Git', 'payload' => 'javascript:alert(1)'], ['text' => 'Resmi', 'url' => 'https://omyo.edu.tr']], $c->butonlar,
+    esit([['text' => 'Git', 'payload' => 'javascript:alert(1)'], ['text' => 'Resmi', 'url' => 'https://www.example.edu.tr']], $c->butonlar,
         'javascript: url düşmeli; payload düz metindir ve istemcide komut/mesaj olarak gönderilir');
 });
 test('eski JSON döndüren modül desteklenir', function () {
@@ -496,6 +496,37 @@ test('sistem mesajı: Türkçe tarih, okul bilgisi ve kurallar', function () {
 test('API anahtarı yoksa ağa çıkmadan hata döner', function () {
     esit('hata', (new LLMClient(''))->chat('selam', [], [])['durum']);
 });
+test('okul adı $OKUL_BILGISI\'nden gelir; boşsa örnek okul adı kullanılır', function () {
+    esit('Test MYO', LLMClient::okulAdi('  Test MYO '));
+    esit(LLMClient::VARSAYILAN_OKUL, LLMClient::okulAdi(null));
+    esit(LLMClient::VARSAYILAN_OKUL, LLMClient::okulAdi('   '));
+    icerir(LLMClient::sistemMesaji(''), LLMClient::VARSAYILAN_OKUL . ' öğrencilerine');
+});
+
+// ======================================================================
+grup('Örnek modüller (modules/)');
+// ======================================================================
+test('telefon rehberi: $REHBER_API_URL boşsa ağa çıkmadan "ayarlanmamış" der', function () {
+    $onceki = $GLOBALS['REHBER_API_URL'] ?? null;
+    $GLOBALS['REHBER_API_URL'] = '';
+    $_SESSION = [];
+    try {
+        $m = new MistikEngine(null, [
+            'router'     => new RuleBasedRouter(null, [], [['id' => 1, 'modul_kodu' => 'telefon_rehberi', 'modul_adi' => 'Telefon Rehberi',
+                                                             'cevap_metni' => '', 'buton_metni' => null, 'aktif_mi' => 1]]),
+            'bert'       => new BertClient(''),
+            'llm'        => new LLMClient(''),
+            'plugin_dir' => dirname(__DIR__) . '/modules',
+            'session_id' => str_repeat('b', 64),
+        ]);
+        $c = $m->process('', 'modul_telefon_rehberi');
+        icerir($c->metin, 'Rehber servisi ayarlanmamış');
+        esit(null, $_SESSION['mistik']['bekleyen'] ?? null, 'isim sorusu beklemeye alınmamalı');
+    } finally {
+        $GLOBALS['REHBER_API_URL'] = $onceki;
+        $_SESSION = [];
+    }
+});
 
 // ======================================================================
 grup('Bicim::markdownLite (LLM çıktısı)');
@@ -514,11 +545,11 @@ test('kalın, satır sonu ve listeler', function () {
     esit('<strong>&lt;b&gt;x&lt;/b&gt;</strong>', Bicim::markdownLite('**<b>x</b>**'));
 });
 test('yalnız https bağlantıları', function () {
-    $c = Bicim::markdownLite('Bak: https://omyo.edu.tr/a?b=1&c=2.');
-    icerir($c, '<a href="https://omyo.edu.tr/a?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">');
+    $c = Bicim::markdownLite('Bak: https://www.example.edu.tr/a?b=1&c=2.');
+    icerir($c, '<a href="https://www.example.edu.tr/a?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">');
     dogru(substr($c, -5) === '</a>.', 'sondaki nokta bağlantı dışında: ' . $c);
     icermez(Bicim::markdownLite('http://ornek.com'), '<a');
-    icerir(Bicim::markdownLite('[site](https://omyo.edu.tr)'), '>site</a>');
+    icerir(Bicim::markdownLite('[site](https://www.example.edu.tr)'), '>site</a>');
 });
 test('javascript: ve öznitelik kaçışı denemeleri etkisiz', function () {
     $c = Bicim::markdownLite('[tıkla](javascript:alert(1)) ve [x](http://a.com)');

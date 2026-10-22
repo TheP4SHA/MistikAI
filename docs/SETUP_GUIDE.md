@@ -63,6 +63,9 @@ $BERT_API_KEY = '';             // same value as BERT_API_KEY of the service
 
 // Required: salt for the IP hash in logs and rate limiting
 $IP_TUZU = 'paste-a-long-random-string-here';
+
+// Your school's name (chat page title and welcome text, LLM system prompt)
+$OKUL_BILGISI = 'Örnek Meslek Yüksekokulu';
 ```
 
 Generate a salt with `php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"`. Keep the rest of the file (the PDO connection and the `global` lines) as it is.
@@ -71,36 +74,48 @@ Every key, with its default, is listed in the [configuration reference](../READM
 
 - `$ADMIN_KOD_EDITORU` — keep `false` in production; it enables the in-browser PHP editor and SQL terminal.
 - `$GUVENILIR_VEKILLER` — if MistikAI runs behind a reverse proxy or load balancer, list its IPs so the real client IP is used for rate limiting. Leave it empty otherwise.
-- `$SCRAPER_IZINLI_HOSTLAR` — the content scraper only fetches from these hosts, e.g. `['www.example.edu.tr']`. Empty disables it.
+- `$SCRAPER_IZINLI_HOSTLAR` — the content scraper only fetches from these hosts, e.g. `['www.example.edu.tr']`. Empty disables it. The source pages themselves are set in the admin panel under **Sistem Ayarları** (empty by default).
+- `$REHBER_API_URL` — the staff directory API used by the example phonebook module, e.g. `'https://rehber.example.edu.tr/api/ara'`. Empty: the module answers that the directory is not configured.
 - `$DAKIKA_ISTEK_SINIRI`, `$MESAJ_MAX_UZUNLUK`, `$LOG_SAKLAMA_GUN` — rate limit, message length and log retention.
 - `$BASE_PATH` — set it (e.g. `'/MistikAI'`) when the site is not at the web root.
 
 ## 4. Web Server Configuration (Crucial Step)
 
-The architecture of MistikAI dictates that **only the `public/` directory** should be accessible from the web. The `src/`, `config/`, and `database/` folders must remain hidden for security.
+The chat page lives in `public/` and the admin panel in `admin/`; both must be reachable from the web. The `src/`, `config/`, `modules/`, `database/`, `tests/` and `bert-model/` folders must not be served. If the document root points at `public/`, `admin/` is outside it and needs its own alias; the simplest setup is the project folder under the web root (for example `/MistikAI`, with `$BASE_PATH = '/MistikAI'`) and web access to the internal folders denied.
+
+### Quick local try-out (PHP built-in server)
+
+```bash
+cd MistikAI
+php -S 127.0.0.1:8000 -t .
+# chat:  http://127.0.0.1:8000/public/
+# admin: http://127.0.0.1:8000/admin/
+```
+
+Keep `$BASE_PATH = ''`. The built-in server is for development only.
 
 ### Using Localhost (XAMPP / WAMP / Laragon)
 
-**Laragon (Recommended):**
-If you put the `MistikAI` folder inside `laragon/www`, Laragon will automatically create `http://mistikai.test`. However, you must point the document root to `public/`.
-- Right click Laragon -> Apache -> `sites-enabled`
-- Edit your auto-generated config and change `DocumentRoot` to `C:/laragon/www/MistikAI/public/`.
-- Restart Apache.
+Place the `MistikAI` folder in `htdocs` / `www` (Laragon: `laragon/www`). The chat is then at `http://localhost/MistikAI/public/` and the admin panel at `http://localhost/MistikAI/admin/`; set `$BASE_PATH = '/MistikAI'`.
 
-**XAMPP / WAMP:**
-If you place the project in `htdocs` or `www` without configuring a virtual host, you will access the site via `http://localhost/MistikAI/public/` (set `$BASE_PATH` accordingly).
-For a professional setup, create an Apache Virtual Host:
+With a virtual host whose document root is the project folder, keep `$BASE_PATH = ''` and deny the internal folders:
 
 ```apache
 <VirtualHost *:80>
-    DocumentRoot "C:/xampp/htdocs/MistikAI/public"
+    DocumentRoot "C:/xampp/htdocs/MistikAI"
     ServerName mistikai.local
-    <Directory "C:/xampp/htdocs/MistikAI/public">
+    <Directory "C:/xampp/htdocs/MistikAI">
         AllowOverride All
         Require all granted
     </Directory>
+    <LocationMatch "^/(config|src|modules|database|tests|bert-model)/">
+        Require all denied
+    </LocationMatch>
+    RedirectMatch ^/$ /public/
 </VirtualHost>
 ```
+
+Chat: `http://mistikai.local/public/`, admin: `http://mistikai.local/admin/`.
 
 ### Using Nginx (Production)
 
@@ -108,15 +123,24 @@ For a professional setup, create an Apache Virtual Host:
 server {
     listen 80;
     server_name www.example.edu.tr;
-    root /var/www/MistikAI/public;
+    root /var/www/MistikAI;
     index index.php;
-    
-    # Forward all chat API requests and frontend routes to index.php
-    location / {
-        try_files $uri $uri/ /index.php?$query_string;
+
+    # Internal folders are never served
+    location ~ ^/(config|src|modules|database|tests|bert-model)/ {
+        deny all;
     }
-    
+
+    location = / {
+        return 302 /public/;
+    }
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
     location ~ \.php$ {
+        try_files $uri =404;
         fastcgi_pass unix:/run/php/php8.2-fpm.sock;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         include fastcgi_params;
@@ -124,9 +148,11 @@ server {
 }
 ```
 
+Chat: `https://www.example.edu.tr/public/`, admin: `https://www.example.edu.tr/admin/`. Use HTTPS in production.
+
 ## 5. Verify Your Installation
 
-1. Open your browser and go to your configured URL (e.g., `http://mistikai.local/` or `http://localhost/MistikAI/public/`). You should see the chat interface.
+1. Open the chat page (e.g., `http://127.0.0.1:8000/public/`, `http://mistikai.local/public/` or `http://localhost/MistikAI/public/`). You should see the chat interface with your `$OKUL_BILGISI` in the welcome text.
 2. Type **"merhaba"**. The bot should respond immediately.
 3. Type **"yemek menüsü"**. It should trigger the `yemekhane` module.
 
@@ -177,7 +203,8 @@ Point `$BERT_API_URL` in `config/db.php` to `http://127.0.0.1:8005/niyet-algila`
 * **Chatbot doesn't reply:** Ensure your `config/db.php` credentials are correct. Check the Network tab in your browser's Developer Tools (F12) to see what `/api.php` is returning.
 * **No natural conversation:** Ensure you have added a valid Groq API key to `db.php` and that `$LLM_MODEL` / `$LLM_YEDEK_MODEL` are models your Groq account can use.
 * **"Too many requests" while testing:** raise `$DAKIKA_ISTEK_SINIRI`. Behind a proxy, add the proxy IP to `$GUVENILIR_VEKILLER`, otherwise all users share one limit.
-* **Scraper does nothing:** add the source host to `$SCRAPER_IZINLI_HOSTLAR`.
+* **Scraper does nothing:** set the source URL under **Sistem Ayarları** and add its host to `$SCRAPER_IZINLI_HOSTLAR`. The bundled parsers are examples for a sample site structure; adapt `yemekAyristir()` / `takvimAyristir()` in `admin/pages/icerik.php` to your pages.
+* **Phonebook says it is not configured:** set `$REHBER_API_URL` and adapt `modules/telefon_rehberi.php` to your directory API.
 * **Admin login blocked:** too many failed attempts; wait a few minutes and try again.
 * **BERT never used:** check `curl http://127.0.0.1:8005/saglik` and that `$BERT_API_KEY` matches the service.
 * **Database Connection Failed:** Make sure MySQL is running and the user privileges are correctly set.

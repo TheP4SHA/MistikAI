@@ -1,8 +1,11 @@
 <?php
 // Kampüs Rehberi Modülü - Eklenti Dosyası
 // Mevcut Değişkenler: $this (Motor Nesnesi), $clean_input, $raw_input, $this->db (Veritabanı)
+//
+// Örnek modül: aşağıdaki birimler ve kat planı kurgusal, tek binalı bir okul içindir.
+// Kendi kampüsünüzün binalarına, birimlerine ve derslik numaralarına göre düzenleyin.
 
-$response = "📍 <b>OMYO Kampüs Rehberi:</b><br><br>";
+$response = "📍 <b>Kampüs Rehberi:</b><br><br>";
 
 // 1. ÖĞRENCİ İŞLERİ KONTROLÜ
 if (strpos($clean_input, 'öğrenci işleri') !== false || strpos($clean_input, 'ogrenci isleri') !== false || strpos($clean_input, 'öğrenci isleri') !== false) {
@@ -31,7 +34,7 @@ if (strpos($clean_input, 'lab') !== false || strpos($clean_input, 'laboratuvar')
 if (preg_match('/(?:derslik|sınıf|sinif|no|numaralı|nolu).+?(\d+)/i', $clean_input, $matches) || preg_match('/(\d+).+?(?:nolu|numaralı|derslik|sınıf|sinif)/i', $clean_input, $matches) || preg_match('/\b(\d{1,2})\b/', $clean_input, $matches)) {
     $sinif_no = (int)$matches[1];
     
-    // OMYO Kat Planı Algoritması
+    // Örnek kat planı: 1-8 → 1. kat, 9-16 → 2. kat, 17-20 → 3. kat
     if ($sinif_no >= 1 && $sinif_no <= 8) {
         return $this->response($response . "🏫 <b>{$sinif_no} Nolu Derslik</b> binamızın <b>1. katında</b> yer almaktadır.");
     } elseif ($sinif_no >= 9 && $sinif_no <= 16) {

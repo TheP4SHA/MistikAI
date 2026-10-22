@@ -10,9 +10,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $yemekhane_url = trim((string)($_POST['yemekhane_url'] ?? ''));
         $takvim_url = trim((string)($_POST['takvim_url'] ?? ''));
         foreach ([$yemekhane_url, $takvim_url] as $u) {
+            if ($u === '') {
+                continue; // Boş adres: o kaynak için kazıma kapalı
+            }
             $sema = strtolower((string)parse_url($u, PHP_URL_SCHEME));
             if (!filter_var($u, FILTER_VALIDATE_URL) || !in_array($sema, ['http', 'https'], true) || strlen($u) > 255) {
-                Panel::json(['success' => false, 'message' => 'Adresler http:// ya da https:// ile başlayan geçerli URL olmalı (en fazla 255 karakter).']);
+                Panel::json(['success' => false, 'message' => 'Adresler boş ya da http:// veya https:// ile başlayan geçerli URL olmalı (en fazla 255 karakter).']);
             }
         }
         try {
@@ -45,8 +48,8 @@ $ayarlar = [];
 foreach ($db->query("SELECT ayar_adi, ayar_degeri FROM bot_sistem_ayarlari")->fetchAll() as $a) {
     $ayarlar[$a['ayar_adi']] = $a['ayar_degeri'];
 }
-$yemekhane_url = $ayarlar['yemekhane_url'] ?? 'https://www.osmaniye.edu.tr/yemekmenu';
-$takvim_url = $ayarlar['takvim_url'] ?? 'https://www.osmaniye.edu.tr/tr/lisansustu/menuler/ogrenci/genel/47321-akademik-takvim';
+$yemekhane_url = $ayarlar['yemekhane_url'] ?? '';
+$takvim_url = $ayarlar['takvim_url'] ?? '';
 $kayit_acik = ($ayarlar['admin_kayit_acik'] ?? '0') === '1';
 $yoneticiler = Panel::tamYetkili()
     ? $db->query("SELECT kullanici_adi, ad_soyad, yetki, kayit_tarihi FROM bot_admin_users ORDER BY id ASC")->fetchAll()
@@ -97,13 +100,13 @@ ob_start();
         <div class="card-body">
             <div class="form-group">
                 <label class="form-label">🍱 Yemekhane Menüsü URL</label>
-                <input type="url" id="yemekhaneUrl" class="modern-input" value="<?php echo Guvenlik::e($yemekhane_url); ?>">
-                <small style="color:var(--text-muted); display:block; margin-top:5px;">Günlük veya haftalık yemek menüsünün çekileceği adres.</small>
+                <input type="url" id="yemekhaneUrl" class="modern-input" value="<?php echo Guvenlik::e($yemekhane_url); ?>" placeholder="https://www.example.edu.tr/yemekhane">
+                <small style="color:var(--text-muted); display:block; margin-top:5px;">Günlük veya haftalık yemek menüsünün çekileceği adres. Boşsa yemek menüsü kazınmaz.</small>
             </div>
             <div class="form-group">
                 <label class="form-label">📅 Akademik Takvim URL</label>
-                <input type="url" id="takvimUrl" class="modern-input" value="<?php echo Guvenlik::e($takvim_url); ?>">
-                <small style="color:var(--text-muted); display:block; margin-top:5px;">Akademik yıl faaliyetlerinin çekileceği adres.</small>
+                <input type="url" id="takvimUrl" class="modern-input" value="<?php echo Guvenlik::e($takvim_url); ?>" placeholder="https://www.example.edu.tr/akademik-takvim">
+                <small style="color:var(--text-muted); display:block; margin-top:5px;">Akademik yıl faaliyetlerinin çekileceği adres. Boşsa takvim kazınmaz.</small>
             </div>
             <div class="form-group">
                 <small style="color:var(--text-muted); display:block;">
@@ -163,9 +166,8 @@ ob_start();
 <script>
 document.getElementById('saveBtn').addEventListener('click', async function () {
     const btn = this;
-    const yemekhane_url = document.getElementById('yemekhaneUrl').value;
-    const takvim_url = document.getElementById('takvimUrl').value;
-    if (!yemekhane_url || !takvim_url) { alert("Lütfen URL alanlarını boş bırakmayın!"); return; }
+    const yemekhane_url = document.getElementById('yemekhaneUrl').value.trim();
+    const takvim_url = document.getElementById('takvimUrl').value.trim();
 
     const originalText = btn.innerHTML;
     btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> KAYDEDİLİYOR...';

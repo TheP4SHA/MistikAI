@@ -1,12 +1,20 @@
 <?php
-// Telefon Rehberi Modülü - Fotoğraflı üniversite rehberi araması
+// Telefon Rehberi Modülü - Fotoğraflı personel rehberi araması
 // Mevcut Değişkenler: $this (Motor), $clean_input, $raw_input, $bekleyen (bekleme devamıysa dizi, değilse null)
 //
 // İki adımlı akış: "telefon rehberi" → "Kimi arıyorsun?" ($this->bekle()) → kullanıcı adı yazar → arama.
 // Tek adımda da çalışır: "Ahmet Yılmaz'ın numarası".
 // API'den gelen her alan kaçışlanır; fotoğraf yalnız https, e-posta bağlantısı yalnız geçerli adresle.
+//
+// Örnek entegrasyon: config/db.php'deki $REHBER_API_URL adresine GET <adres>?aranan=<isim> isteği atılır ve
+// JSON dizi beklenir; her kayıtta adsoyad, unvankisa, birim, telefon (dahili), email, resim alanları okunur.
+// Kurumunuzun rehber servisi farklıysa istek ve alan adlarını ona göre uyarlayın.
+// $REHBER_API_URL boşsa modül ağa çıkmadan "Rehber servisi ayarlanmamış." der.
 
-$rehber_url = (string)($GLOBALS['REHBER_API_URL'] ?? 'https://rehber.osmaniye.edu.tr/rehberdata.php');
+$rehber_url = trim((string)($GLOBALS['REHBER_API_URL'] ?? ''));
+if ($rehber_url === '') {
+    return $this->response("📞 Rehber servisi ayarlanmamış. Personel iletişim bilgileri için okulunun web sitesine ya da santrale başvurabilirsin.");
+}
 $e = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
 // 1. Aranan ismi çıkar: tetik/dolgu kelimeleri atılır.
@@ -38,7 +46,7 @@ if (mb_strlen($aranan_kisi) < 2) {
     $this->bekle(['adim' => 'isim']);
     $soru = $bekleyen !== null
         ? "Bir isim anlayamadım 🙂 Aradığın kişinin <b>adını veya soyadını</b> yazar mısın? (Vazgeçmek için <i>iptal</i> yazabilirsin.)"
-        : "🔍 Üniversite rehberinde kimi arıyorsun? Lütfen aradığın kişinin <b>adını veya soyadını</b> yaz.";
+        : "🔍 Rehberde kimi arıyorsun? Lütfen aradığın kişinin <b>adını veya soyadını</b> yaz.";
     return $this->response($soru);
 }
 
@@ -58,7 +66,7 @@ curl_setopt_array($ch, [
     CURLOPT_PROTOCOLS      => CURLPROTO_HTTPS | CURLPROTO_HTTP,
     CURLOPT_NOSIGNAL       => true,
 ]);
-// Sunucunun DNS çözümleyicisi bu alan adında takılabiliyor; adresi önceden çözüp cURL'e veriyoruz.
+// Bazı sunucularda cURL'ün DNS çözümlemesi takılabiliyor; adresi önceden çözüp cURL'e veriyoruz.
 // CURLOPT_RESOLVE yalnız IP eşlemesini değiştirir; sertifika yine $host adına doğrulanır.
 if (($parca['scheme'] ?? '') === 'https' && $host !== '' && !filter_var($host, FILTER_VALIDATE_IP)) {
     $ip_adresi = gethostbyname($host);
@@ -77,7 +85,7 @@ $tekrar_buton = [['text' => '🔍 Başka birini ara', 'payload' => 'modul_telefo
 
 if ($err || $http_code !== 200 || !is_string($response)) {
     error_log('[MistikAI] Rehber sorgusu başarısız: ' . ($err ?: "HTTP {$http_code}"));
-    return $this->response("⚠️ Üniversite rehber sistemine şu an ulaşılamıyor. Lütfen biraz sonra tekrar dene.", $tekrar_buton);
+    return $this->response("⚠️ Rehber servisine şu an ulaşılamıyor. Lütfen biraz sonra tekrar dene.", $tekrar_buton);
 }
 
 $data = json_decode($response, true);
