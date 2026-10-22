@@ -1,35 +1,27 @@
 <?php
 // Kampüs Astrolojisi Modülü - Eklenti Dosyası
-// Mevcut Değişkenler: $this (Motor Nesnesi), $clean_input, $raw_input, $this->db (Veritabanı)
+// Mevcut Değişkenler: $this (Motor Nesnesi), $clean_input (küçük harf, ASCII katlanmış), $raw_input, $this->db (Veritabanı)
 
+// Anahtarlar ASCII katlanmış burç adlarıdır; $clean_input da katlanmıştır ("Koç" → "koc").
 $burclar = [
-    'koç' => '♈ Koç', 'koc' => '♈ Koç', 'boğa' => '♉ Boğa', 'boga' => '♉ Boğa',
-    'ikizler' => '♊ İkizler', 'yengeç' => '♋ Yengeç', 'yengec' => '♋ Yengeç',
-    'aslan' => '♌ Aslan', 'başak' => '♍ Başak', 'basak' => '♍ Başak',
-    'terazi' => '♎ Terazi', 'akrep' => '♏ Akrep', 'yay' => '♐ Yay',
-    'oğlak' => '♑ Oğlak', 'oglak' => '♑ Oğlak', 'kova' => '♒ Kova',
-    'balık' => '♓ Balık', 'balik' => '♓ Balık'
+    'koc' => '♈ Koç', 'boga' => '♉ Boğa', 'ikizler' => '♊ İkizler', 'yengec' => '♋ Yengeç',
+    'aslan' => '♌ Aslan', 'basak' => '♍ Başak', 'terazi' => '♎ Terazi', 'akrep' => '♏ Akrep',
+    'yay' => '♐ Yay', 'oglak' => '♑ Oğlak', 'kova' => '♒ Kova', 'balik' => '♓ Balık',
 ];
 
 $hedef_burc = null;
 
-// Cümlenin veya RAW payload'ın içinde burç adı geçiyor mu diye kontrol et
-foreach ($burclar as $key => $iconli_isim) {
-    // Hem temizlenmiş (clean_input) hem de ham (raw_input) veriye bakarız
-    if (strpos($clean_input, $key) !== false || strpos(mb_strtolower($raw_input, 'UTF-8'), $key) !== false) {
-        $hedef_burc = $iconli_isim;
-        break;
-    }
+// Burç adı kelime olarak geçiyor mu? ("koç burcu", "burcum yay") — "yayın", "kovalamak" gibi kelimeler eşleşmez.
+if (preg_match('/\b(' . implode('|', array_keys($burclar)) . ')(?:um|im|un|in|uyum|iyim|lar|ler)?\b/', $clean_input, $m)) {
+    $hedef_burc = $burclar[$m[1]];
 }
 
 // Eğer burç adı verilmemişse, kullanıcıdan burcunu seçmesini iste
 if (!$hedef_burc) {
     $buttons = [];
     foreach (['Koç', 'Boğa', 'İkizler', 'Yengeç', 'Aslan', 'Başak', 'Terazi', 'Akrep', 'Yay', 'Oğlak', 'Kova', 'Balık'] as $b) {
-        // SİHİRLİ DOKUNUŞ: Payload'ın başına modül kodunu (kampus_astroloji) ekliyoruz.
-        // Böylece API "Anlayamadım" demez, doğrudan bu modülü tekrar açar!
-        $sihirli_payload = 'kampus_astroloji ' . mb_strtolower($b, 'UTF-8');
-        $buttons[] = ['text' => $b, 'payload' => $sihirli_payload];
+        // Buton metni (burç adı) mesaj olarak gelir; modul_ komutu doğrudan bu modülü çalıştırır.
+        $buttons[] = ['text' => $b, 'payload' => 'modul_kampus_astroloji'];
     }
     return $this->response("🔮 Kampüs falına bakabilmem için bana burcunu söylemelisin:", $buttons);
 }
