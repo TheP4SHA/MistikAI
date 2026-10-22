@@ -1,21 +1,6 @@
 <?php
 // /data/admin/front/akis.php
-
-// GÜVENLİK DUVARI
-if (session_status() === PHP_SESSION_NONE) { session_start(); }
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: /OmyoWeb/MistikAI/admin/login");
-    exit;
-}
-
-// 1. VERİTABANI BAĞLANTISI
-$doc_root = $_SERVER['DOCUMENT_ROOT']; 
-$base_path = $doc_root . '/OmyoWeb/MistikAI/data';
-$db_path = $base_path . '/config/db.php';
-
-if (file_exists($db_path)) { require_once $db_path; } 
-else { die("Kritik Hata: Veritabanı bağlantısı kurulamadı."); }
-global $db;
+require_once __DIR__ . '/../_baslat.php';
 
 // ======================================================================
 // 2. AJAX İŞLEMLERİ (CRUD)
@@ -489,6 +474,7 @@ ob_start();
             <button onclick="closeModal('menuModal')" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;"><i class="fas fa-times"></i></button>
         </div>
         <form id="menuForm" onsubmit="submitForm(event, 'menuForm')">
+            <?php echo Guvenlik::csrfAlani(); ?>
             <input type="hidden" name="action" value="menu_ekle">
             <label>Menü Kodu (Benzersiz - Boşluksuz)</label>
             <input type="text" name="menu_kodu" id="add_m_kodu" class="modern-input" required>
@@ -507,6 +493,7 @@ ob_start();
             <button onclick="closeModal('editMenuModal')" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;"><i class="fas fa-times"></i></button>
         </div>
         <form id="editMenuForm" onsubmit="submitForm(event, 'editMenuForm')">
+            <?php echo Guvenlik::csrfAlani(); ?>
             <input type="hidden" name="action" value="menu_duzenle">
             <input type="hidden" name="menu_id" id="edit_m_id">
             <label>Menü Kodu</label>
@@ -526,6 +513,7 @@ ob_start();
             <button onclick="closeModal('butonModal')" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;"><i class="fas fa-times"></i></button>
         </div>
         <form id="butonForm" onsubmit="submitForm(event, 'butonForm')">
+            <?php echo Guvenlik::csrfAlani(); ?>
             <input type="hidden" name="action" value="buton_ekle">
             <input type="hidden" name="ust_menu_id" id="b_ust_id">
             <div style="margin-bottom:15px; font-size:1rem; color:var(--text-muted);">Ekleneceği Menü: <b id="b_menu_kodu" style="color:white;"></b></div>
@@ -562,6 +550,7 @@ ob_start();
             <button onclick="closeModal('editButonModal')" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;"><i class="fas fa-times"></i></button>
         </div>
         <form id="editButonForm" onsubmit="submitForm(event, 'editButonForm')">
+            <?php echo Guvenlik::csrfAlani(); ?>
             <input type="hidden" name="action" value="buton_duzenle">
             <input type="hidden" name="buton_id" id="edit_b_id">
             <label>Buton Metni</label>
@@ -694,8 +683,7 @@ ob_start();
         const originalText = btn.innerHTML;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> İşleniyor...'; btn.disabled = true;
         try {
-            const res = await fetch('akis', { method: 'POST', body: new FormData(form) });
-            const data = await res.json();
+            const data = await MISTIK.istek('akis', new FormData(form));
             if(data.success) { msg.innerHTML = `<span style="color: var(--success-color);"><i class="fas fa-check-circle"></i> ${data.message}</span>`; setTimeout(() => location.reload(), 800); } 
             else { msg.innerHTML = `<span style="color: var(--danger-color);"><i class="fas fa-exclamation-triangle"></i> ${data.message}</span>`; btn.innerHTML = originalText; btn.disabled = false; }
         } catch (err) { msg.innerHTML = 'Sunucu Hatası!'; btn.innerHTML = originalText; btn.disabled = false; }
@@ -704,20 +692,18 @@ ob_start();
     async function silMenu(id) {
         if(!confirm('DİKKAT: Menü silinirse içindeki tüm butonlar da silinir. Onaylıyor musunuz?')) return;
         const fd = new FormData(); fd.append('action', 'menu_sil'); fd.append('id', id);
-        const res = await fetch('akis', { method: 'POST', body: fd }); const data = await res.json();
+        const data = await MISTIK.istek('akis', fd);
         if(data.success) location.reload();
     }
 
     async function silButon(id) {
         if(!confirm('Butonu silmek istediğinize emin misiniz?')) return;
         const fd = new FormData(); fd.append('action', 'buton_sil'); fd.append('id', id);
-        const res = await fetch('akis', { method: 'POST', body: fd }); const data = await res.json();
+        const data = await MISTIK.istek('akis', fd);
         if(data.success) location.reload();
     }
 </script>
 
 <?php 
 $page_content = ob_get_clean();
-$layout_path = $base_path . '/admin/layouts/master_layouts.php';
-require_once $layout_path; 
-?>
+require_once __DIR__ . '/../layouts/master_layouts.php';

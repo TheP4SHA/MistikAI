@@ -1,41 +1,17 @@
 <?php
 // /data/admin/front/zeka.php
-
-// GÜVENLİK DUVARI: Oturum yoksa logine şutla!
-if (session_status() === PHP_SESSION_NONE) { session_start(); }
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: /OmyoWeb/MistikAI/admin/login");
-    exit;
-}
-
-// 1. VERİTABANI BAĞLANTISI (Mutlak Yol)
-$doc_root = $_SERVER['DOCUMENT_ROOT']; // /var/www/html/
-$base_path = $doc_root . '/OmyoWeb/MistikAI/data';
-$db_path = $base_path . '/config/db.php';
-
-if (file_exists($db_path)) {
-    require_once $db_path;
-} else {
-    try {
-        require_once __DIR__ . '/../../config/db.php';
-        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        die("Kritik Hata: Veritabanı bağlantısı kurulamadı. " . $e->getMessage());
-    }
-}
-global $db;
+require_once __DIR__ . '/../_baslat.php';
 
 // 2. Hangi Modüldeyiz?
 $modul_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 // YOL DÜZELTİLDİ: 'modul'
-if($modul_id == 0) { header("Location: modul"); exit; }
+if($modul_id == 0) { Panel::yonlendir('modul'); }
 
 $stmt = $db->prepare("SELECT * FROM bot_moduller WHERE id = ?");
 $stmt->execute([$modul_id]);
 $modul = $stmt->fetch();
 // YOL DÜZELTİLDİ: 'modul'
-if(!$modul) { header("Location: modul"); exit; }
+if(!$modul) { Panel::yonlendir('modul'); }
 
 // ======================================================================
 // 3. AJAX İŞLEMLERİ (ÇOKLU EKLEME GÜNCELLEMESİ)
@@ -170,7 +146,7 @@ ob_start();
 
 <div class="page-header" style="margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 15px;">
     <div>
-        <a href="modul" class="badge-modern badge-time" style="text-decoration:none; margin-bottom: 10px;"><i class="fas fa-arrow-left"></i> Modüllere Dön</a>
+        <a href="<?php echo Guvenlik::e(Panel::url('modul')); ?>" class="badge-modern badge-time" style="text-decoration:none; margin-bottom: 10px;"><i class="fas fa-arrow-left"></i> Modüllere Dön</a>
         <h1 style="margin-top: 5px; font-size: 2rem;">Zeka Laboratuvarı</h1>
         <p style="color: var(--text-main); font-size: 1.1rem; margin-top: 5px;">Hedef Niyet: <strong style="color:var(--accent-color); background:rgba(139, 92, 246, 0.1); padding: 2px 8px; border-radius:4px;">_<?php echo htmlspecialchars($modul['modul_kodu']); ?></strong> (<?php echo htmlspecialchars($modul['modul_adi']); ?>)</p>
     </div>
@@ -244,6 +220,7 @@ ob_start();
         </div>
         <div class="panel-body">
             <form id="addForm" onsubmit="submitForm(event, 'zeka_ekle', 'addForm')">
+                <?php echo Guvenlik::csrfAlani(); ?>
                 <input type="hidden" name="action" value="zeka_ekle">
                 
                 <div class="form-group">
@@ -289,6 +266,7 @@ ob_start();
         </div>
         <div class="panel-body">
             <form id="editForm" onsubmit="submitForm(event, 'zeka_duzenle', 'editForm')">
+                <?php echo Guvenlik::csrfAlani(); ?>
                 <input type="hidden" name="action" value="zeka_duzenle">
                 <input type="hidden" name="kelime_id" id="edit_id">
                 
@@ -354,8 +332,7 @@ ob_start();
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> İşleniyor...'; btn.disabled = true;
         try {
             // YOL DÜZELTİLDİ: 'zeka?id=X'
-            const res = await fetch('zeka?id=<?php echo $modul_id; ?>', { method: 'POST', body: new FormData(form) });
-            const data = await res.json();
+            const data = await MISTIK.istek('zeka', new FormData(form), {id: <?php echo (int)$modul_id; ?>});
             if(data.success) { msg.innerHTML = `<span style="color: var(--success-color);">${data.message}</span>`; setTimeout(() => location.reload(), 1000); } 
             else { msg.innerHTML = `<span style="color: var(--danger-color);">${data.message}</span>`; btn.innerHTML = originalText; btn.disabled = false; }
         } catch (err) { msg.innerHTML = 'Sunucu Hatası!'; btn.innerHTML = originalText; btn.disabled = false; }
@@ -365,19 +342,11 @@ ob_start();
         if(!confirm('Bu zeka kuralını silmek istediğinize emin misiniz? Bot bu kelimeyi unutacak.')) return;
         const fd = new FormData(); fd.append('action', 'zeka_sil'); fd.append('kelime_id', id);
         // YOL DÜZELTİLDİ: 'zeka?id=X'
-        const res = await fetch('zeka?id=<?php echo $modul_id; ?>', { method: 'POST', body: fd });
-        const data = await res.json();
+        const data = await MISTIK.istek('zeka', fd, {id: <?php echo (int)$modul_id; ?>});
         if(data.success) location.reload(); else alert('Silme esnasında bir hata oluştu.');
     }
 </script>
 <?php
 $extra_js = ob_get_clean();
 
-// YOL DÜZELTİLDİ: /data/admin/layouts
-$layout_path = $base_path . '/admin/layouts/master_layouts.php';
-if (file_exists($layout_path)) {
-    require_once $layout_path; 
-} else {
-    echo "HATA: Layout dosyası bulunamadı: " . $layout_path;
-}
-?>
+require_once __DIR__ . '/../layouts/master_layouts.php';

@@ -1,69 +1,76 @@
 <?php
-// /data/MistikAI/admin/login.php
-if (session_status() === PHP_SESSION_NONE) { session_start(); }
+// admin/login.php - Yönetici girişi (kaba kuvvet freni: bot_giris_denemeleri)
+define('PANEL_GIRISSIZ', true);
+require_once __DIR__ . '/_baslat.php';
 
-// YOL DÜZELTİLDİ: Sitedeki tüm linklerin .htaccess üzerinden doğru çalışması için BASE URL
-$base_url = '/OmyoWeb/MistikAI/admin'; 
+// Aynı IP + kullanıcı adı için 15 dakikada 5 hatalı deneme; aynı IP'den toplamda 20 hatalı deneme.
+const GIRIS_PENCERE_DK = 15;
+const GIRIS_KULLANICI_SINIRI = 5;
+const GIRIS_IP_SINIRI = 20;
 
-// Zaten giriş yapmışsa direkt ana panele at (YOL DÜZELTİLDİ)
-if (isset($_SESSION['admin_id'])) {
-    header("Location: " . $base_url . "/dashboard");
-    exit;
+// Zaten giriş yapmışsa doğrudan panele.
+if (!empty($_SESSION['admin_id'])) {
+    Panel::yonlendir('dashboard');
 }
 
-// 1. VERİTABANI BAĞLANTISI (Mutlak Yol ve FOG Canlı Yedeği)
-$doc_root = $_SERVER['DOCUMENT_ROOT']; // /var/www/html/
-$base_path = $doc_root . '/OmyoWeb/MistikAI/data';
-$db_path = $base_path . '/config/db.php';
-
-if (file_exists($db_path)) {
-    require_once $db_path;
-} else {
-    try {
-        require_once __DIR__ . '/../config/db.php';
-        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        die("Kritik DB Hatası: Veritabanına bağlanılamadı.");
-    }
+// Hiç yönetici yoksa ilk kurulum sayfasına.
+if ((int)$db->query("SELECT COUNT(*) FROM bot_admin_users")->fetchColumn() === 0) {
+    Panel::yonlendir('kurulum');
 }
-global $db;
+
+/** Pencere içindeki hatalı deneme sayıları: [bu kullanıcı adı, bu IP toplamı]. */
+function girisDenemeSayilari(PDO $db, string $ipOzeti, string $kullanici): array {
+    $stmt = $db->prepare("SELECT COUNT(*) AS toplam, COALESCE(SUM(kullanici_adi = ?), 0) AS kullanici
+                          FROM bot_giris_denemeleri
+                          WHERE ip_ozeti = ? AND deneme_tarihi > NOW() - INTERVAL " . GIRIS_PENCERE_DK . " MINUTE");
+    $stmt->execute([$kullanici, $ipOzeti]);
+    $r = $stmt->fetch();
+    return [(int)$r['kullanici'], (int)$r['toplam']];
+}
 
 $hata = '';
+$bilgi = isset($_GET['kuruldu']) ? 'İlk yönetici oluşturuldu. Şimdi giriş yapabilirsiniz.' : '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $kullanici = trim($_POST['kullanici_adi']);
-    $sifre = $_POST['sifre'];
+    $kullanici = trim((string)($_POST['kullanici_adi'] ?? ''));
+    $sifre = (string)($_POST['sifre'] ?? '');
+    $anahtar = mb_strtolower(mb_substr($kullanici, 0, 50, 'UTF-8'), 'UTF-8');
+    $ipOzeti = Guvenlik::ipOzeti();
 
-    if (!empty($kullanici) && !empty($sifre)) {
-        $stmt = $db->prepare("SELECT id, sifre, ad_soyad FROM bot_admin_users WHERE kullanici_adi = :k");
-        $stmt->execute([':k' => $kullanici]);
-        $user = $stmt->fetch();
-
-        // password_verify() ile şifreli (Bcrypt) DB şifresini kontrol eder
-        if ($user && password_verify($sifre, $user['sifre'])) {
-            $_SESSION['admin_id'] = $user['id'];
-            $_SESSION['admin_ad'] = $user['ad_soyad'];
-            // YOL DÜZELTİLDİ: Temiz URL ile Dashboard'a yönlendir
-            header("Location: " . $base_url . "/dashboard");
-            exit;
-        } else {
-            $hata = 'Kullanıcı adı veya şifre hatalı!';
-        }
-    } else {
+    if ($kullanici === '' || $sifre === '') {
         $hata = 'Lütfen tüm alanları doldurun.';
+    } else {
+        [$kullaniciDeneme, $ipDeneme] = girisDenemeSayilari($db, $ipOzeti, $anahtar);
+        if ($kullaniciDeneme >= GIRIS_KULLANICI_SINIRI || $ipDeneme >= GIRIS_IP_SINIRI) {
+            http_response_code(429);
+            $hata = 'Çok fazla hatalı deneme. Lütfen ' . GIRIS_PENCERE_DK . ' dakika sonra tekrar deneyin.';
+        } else {
+            $stmt = $db->prepare("SELECT id, sifre, ad_soyad FROM bot_admin_users WHERE kullanici_adi = ?");
+            $stmt->execute([$kullanici]);
+            $user = $stmt->fetch();
+
+            // Kullanıcı yoksa da bir hash doğrula ki yanıt süresi kullanıcı adının varlığını ele vermesin.
+            $hash = $user['sifre'] ?? '$2y$10$usesomesillystringfore7hnbRJHxXVLeakoG8K30oukPsA.ztMG';
+            $dogru = password_verify($sifre, $hash) && $user;
+
+            if ($dogru) {
+                Guvenlik::oturumYenile();
+                $_SESSION['admin_id'] = (int)$user['id'];
+                $_SESSION['admin_ad'] = $user['ad_soyad'];
+                $db->prepare("DELETE FROM bot_giris_denemeleri WHERE ip_ozeti = ? AND kullanici_adi = ?")->execute([$ipOzeti, $anahtar]);
+                if (password_needs_rehash($user['sifre'], PASSWORD_DEFAULT)) {
+                    $db->prepare("UPDATE bot_admin_users SET sifre = ? WHERE id = ?")->execute([password_hash($sifre, PASSWORD_DEFAULT), $user['id']]);
+                }
+                Panel::yonlendir('dashboard');
+            }
+
+            $db->prepare("INSERT INTO bot_giris_denemeleri (ip_ozeti, kullanici_adi) VALUES (?, ?)")->execute([$ipOzeti, $anahtar]);
+            $db->exec("DELETE FROM bot_giris_denemeleri WHERE deneme_tarihi < NOW() - INTERVAL 1 DAY");
+            $hata = 'Kullanıcı adı veya şifre hatalı.';
+        }
     }
 }
-
-// Kayıt sistemi açık mı diye kontrol edelim (Butonu göstermek için)
-try {
-    $stmt = $db->query("SELECT ayar_degeri FROM bot_sistem_ayarlari WHERE ayar_adi = 'admin_kayit_acik'");
-    $kayit_acik = $stmt->fetchColumn() === '1';
-} catch (\Throwable $th) {
-    $kayit_acik = false; // Tablo yoksa kayıt kapalı varsay
-}
 ?>
-
 <!DOCTYPE html>
 <html lang="tr">
 <head>
@@ -87,6 +94,7 @@ try {
         .btn-submit { width: 100%; background: var(--accent-color); color: white; border: none; padding: 0.8rem; border-radius: 0.5rem; font-size: 1rem; font-weight: 600; cursor: pointer; transition: 0.3s; margin-top: 1rem; }
         .btn-submit:hover { background: var(--accent-hover); }
         .error-msg { background: rgba(239, 68, 68, 0.1); color: var(--danger-color); padding: 0.8rem; border-radius: 0.5rem; margin-bottom: 1rem; font-size: 0.9rem; text-align: center; border: 1px solid rgba(239,68,68,0.3); }
+        .info-msg { background: rgba(16, 185, 129, 0.1); color: #10b981; padding: 0.8rem; border-radius: 0.5rem; margin-bottom: 1rem; font-size: 0.9rem; text-align: center; border: 1px solid rgba(16,185,129,0.3); }
         .auth-footer { margin-top: 1.5rem; text-align: center; font-size: 0.9rem; color: var(--text-muted); }
         .auth-footer a { color: var(--accent-color); text-decoration: none; font-weight: 500; }
         .auth-footer a:hover { text-decoration: underline; }
@@ -99,25 +107,25 @@ try {
             <h1>MistikAI Yönetim</h1>
         </div>
         
-        <?php if($hata): ?><div class="error-msg"><?php echo $hata; ?></div><?php endif; ?>
+        <?php if($hata): ?><div class="error-msg"><?php echo Guvenlik::e($hata); ?></div><?php endif; ?>
+        <?php if($bilgi): ?><div class="info-msg"><?php echo Guvenlik::e($bilgi); ?></div><?php endif; ?>
         
-        <form method="POST" action="<?php echo $base_url; ?>/login">
+        <form method="POST" action="<?php echo Guvenlik::e(Panel::url('login')); ?>">
+            <?php echo Guvenlik::csrfAlani(); ?>
             <div class="form-group">
                 <label>Kullanıcı Adı</label>
-                <input type="text" name="kullanici_adi" required autofocus>
+                <input type="text" name="kullanici_adi" required autofocus autocomplete="username" maxlength="50">
             </div>
             <div class="form-group">
                 <label>Şifre</label>
-                <input type="password" name="sifre" required>
+                <input type="password" name="sifre" required autocomplete="current-password">
             </div>
             <button type="submit" class="btn-submit">Sisteme Giriş Yap</button>
         </form>
-        
-        <?php if($kayit_acik): ?>
+
         <div class="auth-footer">
-            Hesabın yok mu? <a href="<?php echo $base_url; ?>/register">Hemen Kayıt Ol</a>
+            Yeni yönetici hesaplarını tam yetkili bir yönetici Sistem Ayarları'ndan ekler.
         </div>
-        <?php endif; ?>
     </div>
 </body>
 </html>

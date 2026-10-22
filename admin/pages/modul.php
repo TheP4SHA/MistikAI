@@ -1,30 +1,8 @@
 <?php
 // /data/admin/front/modul.php
+require_once __DIR__ . '/../_baslat.php';
 
-// GÜVENLİK DUVARI: Oturum yoksa logine şutla!
-if (session_status() === PHP_SESSION_NONE) { session_start(); }
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: /OmyoWeb/MistikAI/admin/login");
-    exit;
-}
-
-// 1. VERİTABANI BAĞLANTISI (Mutlak Yol)
-$doc_root = $_SERVER['DOCUMENT_ROOT']; // /var/www/html/
-$base_path = $doc_root . '/OmyoWeb/MistikAI/data';
-$db_path = $base_path . '/config/db.php';
-
-if (file_exists($db_path)) {
-    require_once $db_path;
-} else {
-    try {
-        require_once __DIR__ . '/../../config/db.php';
-        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        die("Kritik Hata: Veritabanı bağlantısı kurulamadı.");
-    }
-}
-global $db;
+$moduller_dizini = dirname(__DIR__, 2) . '/modules';
 
 // ======================================================================
 // 2. AJAX İŞLEM YAKALAYICILAR
@@ -120,7 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'get_plugin_code') {
         if ($_SESSION['admin_id'] != 1) { echo json_encode(['success' => false, 'code' => '']); exit; }
         $modul_kodu = preg_replace('/[^a-zA-Z0-9_]/', '', $_POST['modul_kodu']);
-        $file_path = $base_path . '/modules/' . $modul_kodu . '.php';
+        $file_path = $moduller_dizini . '/' . $modul_kodu . '.php';
         
         $code = file_exists($file_path) ? file_get_contents($file_path) : "<?php\n// $modul_kodu Modülü - Özel PHP İşleyicisi\n// \$clean_input : Kullanıcının yazdığı temizlenmiş mesaj\n// \$raw_input : Orijinal mesaj\n\nreturn \$this->response('Özel modül çalışıyor!');\n";
         echo json_encode(['success' => true, 'code' => $code]);
@@ -134,7 +112,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         
         if (empty($modul_kodu)) { echo json_encode(['success' => false, 'message' => 'Modül kodu geçersiz.']); exit; }
         
-        $plugin_dir = $base_path . '/modules';
+        $plugin_dir = $moduller_dizini;
         if (!is_dir($plugin_dir)) { mkdir($plugin_dir, 0755, true); }
         
         $file_path = $plugin_dir . '/' . $modul_kodu . '.php';
@@ -246,7 +224,7 @@ ob_start();
         $card_class = $is_aktif ? '' : 'pasif';
         
         // 🌟 YENİ: Bu modüle ait fiziksel bir PHP dosyası var mı kontrol et
-        $has_plugin = file_exists($base_path . '/modules/' . $mod['modul_kodu'] . '.php');
+        $has_plugin = file_exists($moduller_dizini . '/' . $mod['modul_kodu'] . '.php');
         
         $cevap_metni = $mod['cevap_metni'] ? htmlspecialchars($mod['cevap_metni']) : '<span style="color:var(--text-muted);">[Metin Yok]</span>';
         $has_link = !empty($mod['link_url']);
@@ -308,7 +286,7 @@ ob_start();
                     <i class="fas fa-edit"></i>
                 </button>
 
-                <a href="zeka?id=<?php echo $mod['id']; ?>" class="btn-action to-teach" title="Zeka Laboratuvarı" style="text-decoration:none;">
+                <a href="<?php echo Guvenlik::e(Panel::url('zeka', ['id' => $mod['id']])); ?>" class="btn-action to-teach" title="Zeka Laboratuvarı" style="text-decoration:none;">
                     <i class="fas fa-microchip"></i> Lab
                 </a>
                 
@@ -339,6 +317,7 @@ $extra_js = "
             <button onclick=\"closeModal('modulModal')\" style=\"background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;\"><i class=\"fas fa-times\"></i></button>
         </div>
         <form id=\"modulForm\" onsubmit=\"submitModulForm(event, 'modul_ekle', 'modulForm', 'modulFormMsg')\">
+            " . Guvenlik::csrfAlani() . "
             <input type=\"hidden\" name=\"action\" value=\"modul_ekle\">
             <div style=\"margin-bottom: 1.2rem;\"><label style=\"display:block; margin-bottom:0.3rem; color:white;\">1. Modül Adı</label><input type=\"text\" name=\"modul_adi\" required style=\"width:100%; padding:0.8rem; background:var(--bg-input); border:1px solid var(--border-color); color:white; border-radius:0.5rem; outline:none;\"></div>
             <div style=\"margin-bottom: 1.2rem;\"><label style=\"display:block; margin-bottom:0.3rem; color:white;\">2. Modül Kodu</label><input type=\"text\" name=\"modul_kodu\" required style=\"width:100%; padding:0.8rem; background:var(--bg-input); border:1px solid var(--border-color); color:var(--accent-color); font-family:monospace; border-radius:0.5rem; outline:none;\"></div>
@@ -356,6 +335,7 @@ $extra_js = "
             <button onclick=\"closeModal('editModal')\" style=\"background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;\"><i class=\"fas fa-times\"></i></button>
         </div>
         <form id=\"editForm\" onsubmit=\"submitModulForm(event, 'modul_duzenle', 'editForm', 'editFormMsg')\">
+            " . Guvenlik::csrfAlani() . "
             <input type=\"hidden\" name=\"action\" value=\"modul_duzenle\">
             <input type=\"hidden\" name=\"modul_id\" id=\"editId\">
             <div style=\"margin-bottom: 1.2rem;\"><label style=\"display:block; color:white;\">Modül Adı</label><input type=\"text\" name=\"modul_adi\" id=\"editAdi\" required style=\"width:100%; padding:0.8rem; background:var(--bg-input); border:1px solid var(--border-color); color:white; border-radius:0.5rem;\"></div>
@@ -388,6 +368,7 @@ $extra_js = "
     <div class=\"mistik-modal-box\" style=\"width:700px;\">
         <div class=\"modal-header\" style=\"display:flex; justify-content:space-between; margin-bottom:1rem;\"><h2 style=\"color:var(--warning-color);\"><i class=\"fas fa-terminal\"></i> SQL Terminali</h2><button onclick=\"closeModal('sqlModal')\" style=\"background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;\"><i class=\"fas fa-times\"></i></button></div>
         <form id=\"sqlForm\" onsubmit=\"submitSqlForm(event)\">
+            " . Guvenlik::csrfAlani() . "
             <input type=\"hidden\" name=\"action\" value=\"execute_sql\">
             <textarea name=\"sql_query\" class=\"sql-terminal\" placeholder=\"-- Kodlar buraya\"></textarea>
             <button type=\"submit\" style=\"width:100%; padding:1rem; background:var(--warning-color); color:#000; border:none; border-radius:0.5rem; font-weight:bold; cursor:pointer; margin-top:1rem;\">Çalıştır</button>
@@ -429,8 +410,7 @@ $extra_js = "
         const btn = form.querySelector('button[type=\"submit\"]'); const originalText = btn.innerHTML;
         btn.innerHTML = '<i class=\"fas fa-spinner fa-spin\"></i> İşleniyor...'; btn.disabled = true;
         try {
-            const res = await fetch('modul', { method: 'POST', body: new FormData(form) });
-            const data = await res.json();
+            const data = await MISTIK.istek('modul', new FormData(form));
             if(data.success) { msg.innerHTML = `<span style=\"color: var(--success-color);\"> \${data.message}</span>`; setTimeout(() => location.reload(), 1000); } 
             else { msg.innerHTML = `<span style=\"color: var(--danger-color);\"> \${data.message}</span>`; btn.innerHTML = originalText; btn.disabled = false; }
         } catch (err) { msg.innerHTML = 'Sunucu Hatası!'; btn.innerHTML = originalText; btn.disabled = false; }
@@ -439,18 +419,18 @@ $extra_js = "
     async function toggleStatus(modul_id, yeni_durum) {
         if(!confirm(yeni_durum === 0 ? 'Devre dışı bırakılsın mı?' : 'Aktif edilsin mi?')) return;
         const fd = new FormData(); fd.append('action', 'toggle_status'); fd.append('modul_id', modul_id); fd.append('yeni_durum', yeni_durum);
-        const res = await fetch('modul', { method: 'POST', body: fd }); const data = await res.json(); if(data.success) location.reload();
+        const data = await MISTIK.istek('modul', fd); if(data.success) location.reload();
     }
 
     async function deleteModul(modul_id) {
         if(prompt('Bu modülü KALICI OLARAK silmek için \"SİL\" yazın:') !== 'SİL') return;
         const fd = new FormData(); fd.append('action', 'modul_sil'); fd.append('modul_id', modul_id);
-        const res = await fetch('modul', { method: 'POST', body: fd }); const data = await res.json(); if(data.success) location.reload(); else alert(data.message);
+        const data = await MISTIK.istek('modul', fd); if(data.success) location.reload(); else alert(data.message);
     }
 
     async function submitSqlForm(e) {
         e.preventDefault(); 
-        const res = await fetch('modul', { method: 'POST', body: new FormData(e.target) }); const data = await res.json(); 
+        const data = await MISTIK.istek('modul', new FormData(e.target));
         const rb = document.getElementById('sqlResult');
         if(data.success && data.type === 'select') { rb.innerHTML = JSON.stringify(data.data, null, 2); rb.style.display = 'block'; } else { alert(data.message); }
     }
@@ -481,8 +461,7 @@ $extra_js = "
         document.getElementById('ideModal').classList.add('active');
 
         try {
-            const res = await fetch('modul', { method: 'POST', body: fd });
-            const data = await res.json();
+            const data = await MISTIK.istek('modul', fd);
             if(data.success) {
                 editor.setValue(data.code, -1); // -1 imleci en üste koyar
             } else {
@@ -508,8 +487,7 @@ $extra_js = "
         fd.append('php_code', code);
 
         try {
-            const res = await fetch('modul', { method: 'POST', body: fd });
-            const data = await res.json();
+            const data = await MISTIK.istek('modul', fd);
             alert(data.message);
             if(data.success) {
                 location.reload(); // Rozetlerin (⚡) güncellenmesi için sayfayı yenile
@@ -524,11 +502,4 @@ $extra_js = "
 </script>
 ";
 
-// YOL DÜZELTİLDİ: Mutlak Yol (Absolute)
-$layout_path = $base_path . '/admin/layouts/master_layouts.php';
-if (file_exists($layout_path)) {
-    require_once $layout_path; 
-} else {
-    echo "HATA: Layout dosyası bulunamadı: " . $layout_path;
-}
-?>
+require_once __DIR__ . '/../layouts/master_layouts.php';

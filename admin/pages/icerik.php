@@ -1,36 +1,6 @@
 <?php
 // /data/admin/front/icerik.php
-
-// GÜVENLİK DUVARI: Oturum yoksa logine şutla
-if (session_status() === PHP_SESSION_NONE) { session_start(); }
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: /OmyoWeb/MistikAI/admin/login");
-    exit;
-}
-
-// 1. YOL DÜZELTMESİ: Kök dizin (Artık sadece /data kullanılıyor)
-$doc_root = $_SERVER['DOCUMENT_ROOT']; // /var/www/html/
-$base_path = $doc_root . '/OmyoWeb/MistikAI/data';
-
-// Autoload Yolu (Yeni Klasör Yapısı)
-$vendor_path = $base_path . '/vendor/autoload.php';
-if (file_exists($vendor_path)) { require_once $vendor_path; }
-
-// Veritabanı Yolu (Mutlak Yol)
-$db_path = $base_path . '/config/db.php';
-if (file_exists($db_path)) {
-    require_once $db_path;
-} else {
-    // Eğer config/db.php yoksa, canlı FOG sunucusuna varsayılan bilgilerle bağlan
-    try {
-        require_once __DIR__ . '/../../config/db.php';
-        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        die("Veritabanı bağlantı hatası!");
-    }
-}
-global $db;
+require_once __DIR__ . '/../_baslat.php';
 
 // Türkçe tarih metinlerini (Örn: "28 Temmuz 2025 Pazartesi") SQL formatına (YYYY-MM-DD) çeviren zeki fonksiyon
 function parseTrDate($text) {
@@ -169,7 +139,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 $page_title = "Veri Havuzu & Scraper";
 $active_menu = "icerik";
-$tab = isset($_GET['tab']) ? $_GET['tab'] : 'yemek';
+$tab = ($_GET['tab'] ?? '') === 'takvim' ? 'takvim' : 'yemek';
 
 ob_start();
 ?>
@@ -210,9 +180,9 @@ ob_start();
     </div>
 
     <div class="hub-nav">
-        <a href="icerik?tab=yemek" class="hub-tab <?php echo $tab == 'yemek' ? 'active' : ''; ?>">🍱 YEMEKHANE</a>
-        <a href="icerik?tab=takvim" class="hub-tab <?php echo $tab == 'takvim' ? 'active' : ''; ?>">📅 AKADEMİK TAKVİM</a>
-        <a href="ders" class="hub-tab">📚 DERS PROGRAMI</a>
+        <a href="<?php echo Guvenlik::e(Panel::url('icerik', ['tab' => 'yemek'])); ?>" class="hub-tab <?php echo $tab == 'yemek' ? 'active' : ''; ?>">🍱 YEMEKHANE</a>
+        <a href="<?php echo Guvenlik::e(Panel::url('icerik', ['tab' => 'takvim'])); ?>" class="hub-tab <?php echo $tab == 'takvim' ? 'active' : ''; ?>">📅 AKADEMİK TAKVİM</a>
+        <a href="<?php echo Guvenlik::e(Panel::url('ders')); ?>" class="hub-tab">📚 DERS PROGRAMI</a>
     </div>
 
     <?php if ($tab == 'yemek'): ?>
@@ -297,8 +267,7 @@ async function syncYemek() {
     
     const fd = new FormData(); fd.append('action', 'sync_yemek');
     try {
-        const res = await fetch('icerik?tab=yemek', { method: 'POST', body: fd });
-        const data = await res.json();
+        const data = await MISTIK.istek('icerik', fd, {tab: 'yemek'});
         if (data.success) { alert('✅ ' + data.message); location.reload(); } 
         else { alert('❌ ' + data.message); }
     } catch (e) { alert('Sunucu hatası!'); } 
@@ -318,8 +287,7 @@ async function syncTakvim() {
     fd.append('takvim_url', url);
 
     try {
-        const res = await fetch('icerik?tab=takvim', { method: 'POST', body: fd });
-        const data = await res.json();
+        const data = await MISTIK.istek('icerik', fd, {tab: 'takvim'});
         if (data.success) { alert('✅ ' + data.message); location.reload(); } 
         else { alert('❌ ' + data.message); }
     } catch (e) { alert('Sunucu veya Parse hatası! HTML yapısı değişmiş olabilir.'); } 
@@ -330,11 +298,4 @@ async function syncTakvim() {
 <?php 
 $page_content = ob_get_clean();
 
-// 4. LAYOUT YOLU DÜZELTİLDİ
-$layout_path = $base_path . '/admin/layouts/master_layouts.php';
-if (file_exists($layout_path)) {
-    require_once $layout_path; 
-} else {
-    echo "HATA: Layout dosyası bulunamadı: " . $layout_path;
-}
-?>
+require_once __DIR__ . '/../layouts/master_layouts.php';

@@ -1,30 +1,6 @@
 <?php
 // /data/admin/front/logger.php - Blackbox V2.2 (Sanal Niyet ve Saf Niyet Destekli)
-
-// GÜVENLİK DUVARI: Oturum yoksa logine şutla!
-if (session_status() === PHP_SESSION_NONE) { session_start(); }
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: /OmyoWeb/MistikAI/admin/login");
-    exit;
-}
-
-// 1. VERİTABANI BAĞLANTISI
-$doc_root = $_SERVER['DOCUMENT_ROOT']; 
-$base_path = $doc_root . '/OmyoWeb/MistikAI/data';
-$db_path = $base_path . '/config/db.php';
-
-if (file_exists($db_path)) {
-    require_once $db_path;
-} else {
-    try {
-        require_once __DIR__ . '/../../config/db.php';
-        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        die("Kritik Hata: Veritabanı bağlantısı kurulamadı. " . $e->getMessage());
-    }
-}
-global $db;
+require_once __DIR__ . '/../_baslat.php';
 
 // ======================================================================
 // 2. AJAX İŞLEM YAKALAYICI
@@ -184,7 +160,7 @@ ob_start();
     </div>
 </div>
 
-<form method="GET" class="filter-bar" action="logger">
+<form method="GET" class="filter-bar" action="<?php echo Guvenlik::e(Panel::url('logger')); ?>">
     <div class="filter-group" style="flex: 0 0 150px;">
         <select name="status" class="filter-select">
             <option value="all" <?php echo $filter_status == 'all' ? 'selected' : ''; ?>>Tüm Loglar</option>
@@ -198,7 +174,7 @@ ob_start();
     </div>
     <?php if(!empty($filter_session)): ?>
     <div class="filter-group" style="flex: 0 0 auto;">
-        <span class="badge warning"><i class="fas fa-network-wired"></i> Filtrelenen IP: <?php echo htmlspecialchars($filter_session); ?> <a href="logger" style="color:white; margin-left:5px;"><i class="fas fa-times"></i></a></span>
+        <span class="badge warning"><i class="fas fa-network-wired"></i> Filtrelenen IP: <?php echo htmlspecialchars($filter_session); ?> <a href="<?php echo Guvenlik::e(Panel::url('logger')); ?>" style="color:white; margin-left:5px;"><i class="fas fa-times"></i></a></span>
         <input type="hidden" name="sess" value="<?php echo htmlspecialchars($filter_session); ?>">
     </div>
     <?php endif; ?>
@@ -242,7 +218,7 @@ ob_start();
                         // 2. IP Adresi
                         echo "<td>";
                         if($is_main) {
-                            echo "<a href=\"?sess=" . urlencode($log['session_id']) . "\" class=\"ip-badge\"><i class=\"fas fa-globe\"></i> " . htmlspecialchars($log['session_id']) . "</a>";
+                            echo "<a href=\"" . Guvenlik::e(Panel::url('logger', ['sess' => $log['session_id']])) . "\" class=\"ip-badge\"><i class=\"fas fa-globe\"></i> " . htmlspecialchars($log['session_id']) . "</a>";
                             if($log_count > 1) {
                                 echo "<div style=\"margin-top:8px;\">";
                                 echo "<button type=\"button\" class=\"toggle-btn\" onclick=\"toggleGroup({$group_id})\"><i class=\"fas fa-chevron-down\" id=\"icon-{$group_id}\"></i> +" . ($log_count - 1) . " Geçmiş</button>";
@@ -336,6 +312,7 @@ $extra_js = "
             <button onclick=\"closeModal()\" style=\"background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;\"><i class=\"fas fa-times\"></i></button>
         </div>
         <form id=\"ogretForm\" onsubmit=\"submitOgretForm(event)\">
+            " . Guvenlik::csrfAlani() . "
             <input type=\"hidden\" name=\"action\" value=\"ogret\">
             
             <div class=\"form-group\" style=\"margin-bottom: 1.2rem;\">
@@ -419,8 +396,7 @@ $extra_js .= "
         btn.disabled = true;
         
         try {
-            const response = await fetch('logger', { method: 'POST', body: new FormData(form) });
-            const data = await response.json();
+            const data = await MISTIK.istek('logger', new FormData(form));
             
             if(data.success) {
                 formMsg.innerHTML = `<span style=\"color: var(--success-color);\"><i class=\"fas fa-check-circle\"></i> \${data.message}</span>`;
@@ -439,10 +415,4 @@ $extra_js .= "
 </script>
 ";
 
-$layout_path = $base_path . '/admin/layouts/master_layouts.php';
-if (file_exists($layout_path)) {
-    require_once $layout_path; 
-} else {
-    echo "HATA: Layout dosyası bulunamadı: " . $layout_path;
-}
-?>
+require_once __DIR__ . '/../layouts/master_layouts.php';

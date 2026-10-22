@@ -1,30 +1,6 @@
 <?php
-// GÜVENLİK DUVARI: Oturum yoksa kodun 1 satır bile aşağı inmesine izin verme, direkt logine şutla!
-if (session_status() === PHP_SESSION_NONE) { session_start(); }
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: /OmyoWeb/MistikAI/admin/login");
-    exit; // exit çok önemlidir, kodun devamının okunmasını KESİN OLARAK keser!
-}
-
-// 1. VERİTABANINA BAĞLAN (Kök Dizin Mantığı ve Canlı Sunucu Yedeği)
-$doc_root = $_SERVER['DOCUMENT_ROOT']; // /var/www/html/
-// YOL DÜZELTİLDİ: Artık data/MistikAI yerine direkt data/ klasörü kullanılıyor.
-$base_path = $doc_root . '/OmyoWeb/MistikAI/data';
-$db_path = $base_path . '/config/db.php';
-
-if (file_exists($db_path)) {
-    require_once $db_path;
-} else {
-    // config/db.php yoksa canlı FOG sunucusuna zorla bağlan
-    try {
-        require_once __DIR__ . '/../../config/db.php';
-        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        die("Kritik Hata: Veritabanı bağlantısı kurulamadı. " . $e->getMessage());
-    }
-}
-global $db;
+// admin/pages/dashboard.php - Komuta Merkezi
+require_once __DIR__ . '/../_baslat.php';
 
 // ======================================================================
 // 2. ULTRA DETAYLI İSTATİSTİKLER (SQL)
@@ -177,7 +153,7 @@ ob_start();
     <div class="bento-box col-8">
         <div class="box-title">
             <span><i class="fas fa-stream" style="color: var(--accent-color);"></i> Son Canlı Log Akışı</span>
-            <a href="logger" style="font-size: 0.8rem; color: var(--text-muted); text-decoration: none;">Tümünü Gör <i class="fas fa-arrow-right"></i></a>
+            <a href="<?php echo Guvenlik::e(Panel::url('logger')); ?>" style="font-size: 0.8rem; color: var(--text-muted); text-decoration: none;">Tümünü Gör <i class="fas fa-arrow-right"></i></a>
         </div>
         <div style="padding-left: 10px;">
             <?php if(empty($son_loglar)): ?>
@@ -250,7 +226,7 @@ ob_start();
     <div class="bento-box col-6" style="border-color: rgba(239, 68, 68, 0.3);">
         <div class="box-title" style="border-bottom-color: rgba(239,68,68,0.3);">
             <span style="color: var(--danger-color);"><i class="fas fa-skull-crossbones"></i> En Çok Takılan Kelimeler (Kör Nokta)</span>
-            <a href="logger" class="btn-outline" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;"><i class="fas fa-graduation-cap"></i> Eğit</a>
+            <a href="<?php echo Guvenlik::e(Panel::url('logger')); ?>" class="btn-outline" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;"><i class="fas fa-graduation-cap"></i> Eğit</a>
         </div>
         <div class="data-list">
             <?php foreach($top_basarisiz as $item): ?>
@@ -267,12 +243,4 @@ ob_start();
 <?php 
 $page_content = ob_get_clean();
 
-// 4. LAYOUT YOLU DÜZELTİLDİ (Mutlak Yol)
-// YOL DÜZELTİLDİ: /data/admin/layouts/master_layouts.php
-$layout_path = $base_path . '/admin/layouts/master_layouts.php';
-if (file_exists($layout_path)) {
-    require_once $layout_path; 
-} else {
-    echo "HATA: Layout dosyası bulunamadı: " . $layout_path;
-}
-?>
+require_once __DIR__ . '/../layouts/master_layouts.php';

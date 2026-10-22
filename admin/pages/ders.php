@@ -1,36 +1,6 @@
 <?php
 // /data/admin/front/ders.php
-
-// GÜVENLİK DUVARI: Oturum yoksa kodun 1 satır bile aşağı inmesine izin verme, direkt logine şutla!
-if (session_status() === PHP_SESSION_NONE) { session_start(); }
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: /OmyoWeb/MistikAI/admin/login");
-    exit;
-}
-
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
-
-// 1. VERİTABANINA BAĞLAN (Kök Dizin Mantığı ve Canlı Sunucu Yedeği)
-$doc_root = $_SERVER['DOCUMENT_ROOT']; // /var/www/html/
-// YOL DÜZELTİLDİ: Artık fazladan MistikAI yok, doğrudan /data
-$base_path = $doc_root . '/OmyoWeb/MistikAI/data';
-$db_path = $base_path . '/config/db.php';
-
-if (file_exists($db_path)) {
-    require_once $db_path;
-} else {
-    // config/db.php yoksa canlı FOG sunucusuna zorla bağlan
-    try {
-        require_once __DIR__ . '/../../config/db.php';
-        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        die("Kritik Hata: Veritabanı bağlantısı kurulamadı. " . $e->getMessage());
-    }
-}
-global $db;
+require_once __DIR__ . '/../_baslat.php';
 
 // ======================================================================
 // AJAX İŞLEMLERİ
@@ -147,9 +117,9 @@ ob_start();
     </div>
 
     <div class="hub-nav">
-        <a href="icerik?tab=yemek" class="hub-tab">🍱 YEMEKHANE</a>
-        <a href="icerik?tab=takvim" class="hub-tab">📅 AKADEMİK TAKVİM</a>
-        <a href="ders" class="hub-tab active">📚 DERS PROGRAMI</a>
+        <a href="<?php echo Guvenlik::e(Panel::url('icerik', ['tab' => 'yemek'])); ?>" class="hub-tab">🍱 YEMEKHANE</a>
+        <a href="<?php echo Guvenlik::e(Panel::url('icerik', ['tab' => 'takvim'])); ?>" class="hub-tab">📅 AKADEMİK TAKVİM</a>
+        <a href="<?php echo Guvenlik::e(Panel::url('ders')); ?>" class="hub-tab active">📚 DERS PROGRAMI</a>
     </div>
 
     <div class="card-pasha">
@@ -343,8 +313,7 @@ async function saveParsedData() {
     fd.append('payload', JSON.stringify(parsedData));
 
     try {
-        const res = await fetch('ders', { method: 'POST', body: fd });
-        const data = await res.json();
+        const data = await MISTIK.istek('ders', fd);
         
         if(data.success) {
             alert(data.message);
@@ -363,19 +332,12 @@ let deleteTarget = null;
 function askDel(id) { deleteTarget = id; document.getElementById('mistikOverlay').style.display = 'flex'; }
 document.getElementById('delBtn').onclick = async () => {
     const fd = new FormData(); fd.append('action', 'delete_item'); fd.append('id', deleteTarget);
-    await fetch('ders', { method: 'POST', body: fd });
-    location.reload();
+    const data = await MISTIK.istek('ders', fd);
+    if (data.success) { location.reload(); } else { alert(data.message); }
 };
 </script>
 
 <?php 
 $page_content = ob_get_clean();
 
-// LAYOUT YOLU DÜZELTİLDİ
-$layout_path = $base_path . '/admin/layouts/master_layouts.php';
-if (file_exists($layout_path)) {
-    require_once $layout_path; 
-} else {
-    echo "HATA: Layout dosyası bulunamadı: " . $layout_path;
-}
-?>
+require_once __DIR__ . '/../layouts/master_layouts.php';
