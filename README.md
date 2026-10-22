@@ -159,7 +159,7 @@ php -S 127.0.0.1:8000 -t .
 # admin:  http://127.0.0.1:8000/admin/
 ```
 
-On a real web server, place the project folder under the web root, for example as `/MistikAI`: the chat is then `https://your-host/MistikAI/public/`, the admin panel `https://your-host/MistikAI/admin/`, and `$BASE_PATH` must be `'/MistikAI'` (keep it `''` when the project is the web root). `config/`, `src/`, `modules/`, `database/`, `tests/` and `bert-model/` are not meant to be served; deny web access to them (for example an `.htaccess` file containing `Require all denied` in each of those folders on Apache, or `location ~ ^/MistikAI/(config|src|modules|database|tests|bert-model)/ { deny all; }` on nginx). If you point the document root at `public/` instead, `admin/` lies outside it and needs its own alias. Server-specific notes: [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md).
+On a real web server, place the project folder under the web root, for example as `/MistikAI`: the chat is then `https://your-host/MistikAI/public/`, the admin panel `https://your-host/MistikAI/admin/`, and `$BASE_PATH` must be `'/MistikAI'` (keep it `''` when the project is the web root). `config/`, `src/`, `modules/`, `database/`, `tests/` and `bert-model/` are not meant to be served; on Apache each of these folders ships with an `.htaccess` containing `Require all denied` (requires `AllowOverride All` or at least `AuthConfig`); on nginx add `location ~ ^/MistikAI/(config|src|modules|database|tests|bert-model|docs)/ { deny all; }`. If you point the document root at `public/` instead, `admin/` lies outside it and needs its own alias. Server-specific notes: [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md).
 
 ### 4. Create the first admin
 

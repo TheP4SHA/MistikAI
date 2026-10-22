@@ -1,0 +1,2 @@
+# Bu klasör web üzerinden sunulmaz (Apache 2.4). nginx için README'deki location kuralını kullanın.
+Require all denied

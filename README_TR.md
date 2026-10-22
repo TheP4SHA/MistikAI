@@ -159,7 +159,7 @@ php -S 127.0.0.1:8000 -t .
 # panel:  http://127.0.0.1:8000/admin/
 ```
 
-Gerçek bir web sunucusunda proje klasörünü web kökünün altına, örneğin `/MistikAI` olarak koyun: sohbet `https://sunucunuz/MistikAI/public/`, panel `https://sunucunuz/MistikAI/admin/` olur ve `$BASE_PATH` `'/MistikAI'` olmalıdır (proje web kökündeyse `''` bırakın). `config/`, `src/`, `modules/`, `database/`, `tests/` ve `bert-model/` web'den sunulmak için değildir; bunlara erişimi kapatın (örneğin Apache'de bu klasörlerin her birine `Require all denied` satırı olan bir `.htaccess`, nginx'te `location ~ ^/MistikAI/(config|src|modules|database|tests|bert-model)/ { deny all; }`). Belge kökünü `public/` yaparsanız `admin/` bunun dışında kalır ve ayrı bir alias gerekir. Sunucuya özel notlar: [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md).
+Gerçek bir web sunucusunda proje klasörünü web kökünün altına, örneğin `/MistikAI` olarak koyun: sohbet `https://sunucunuz/MistikAI/public/`, panel `https://sunucunuz/MistikAI/admin/` olur ve `$BASE_PATH` `'/MistikAI'` olmalıdır (proje web kökündeyse `''` bırakın). `config/`, `src/`, `modules/`, `database/`, `tests/` ve `bert-model/` web'den sunulmak için değildir; Apache'de bu klasörlerin her birinde `Require all denied` içeren bir `.htaccess` hazır gelir (`AllowOverride All` ya da en az `AuthConfig` gerekir); nginx'te `location ~ ^/MistikAI/(config|src|modules|database|tests|bert-model|docs)/ { deny all; }` ekleyin. Belge kökünü `public/` yaparsanız `admin/` bunun dışında kalır ve ayrı bir alias gerekir. Sunucuya özel notlar: [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md).
 
 ### 4. İlk yöneticiyi oluşturun
 
