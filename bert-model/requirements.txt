@@ -1,6 +1,19 @@
-torch>=2.0
-transformers>=4.30
-flask>=3.0
-mysql-connector-python>=8.0
-scikit-learn>=1.3
-numpy>=1.24
+# MistikAI BERT service - pinned, tested together on Python 3.9-3.12.
+#
+# CPU-only servers: install the (much smaller) CPU build of torch FIRST,
+# then the rest of this file:
+#   pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements.txt
+#
+# Serving only needs torch, transformers, flask and waitress.
+# Training additionally needs accelerate, scikit-learn and numpy.
+# extract_dataset.py needs mysql-connector-python.
+
+torch==2.5.1
+transformers==4.46.3
+accelerate==1.1.1
+flask==3.0.3
+waitress==3.0.2
+mysql-connector-python==9.1.0
+scikit-learn==1.5.2
+numpy==1.26.4
