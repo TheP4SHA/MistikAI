@@ -1,22 +1,26 @@
 -- MistikAI Sample Data (Demo)
 -- Import after schema.sql
 --
+-- Everything below is sample data for a fictional school ("Örnek Meslek Yüksekokulu"):
+-- departments, courses, instructors, meals and calendar dates are made up.
+-- Replace them with your own data from the admin panel or with your own SQL.
+--
 -- No admin user is created here. After importing, open /admin/kurulum.php
 -- (first-run setup) to create the first full admin with your own password.
 
 SET NAMES utf8mb4;
 START TRANSACTION;
 
--- System Settings (adding admins from the panel is closed by default)
+-- System Settings (adding admins from the panel is closed by default).
+-- The scraper source URLs (yemekhane_url, takvim_url) are not set here: enter your school's pages
+-- under Admin > Sistem Ayarları. While they are empty the scraper reports that no source is defined.
 INSERT INTO `bot_sistem_ayarlari` (`ayar_adi`, `ayar_degeri`) VALUES
-('admin_kayit_acik', '0'),
-('yemekhane_url', 'https://www.osmaniye.edu.tr/yemekmenu'),
-('takvim_url', 'https://www.osmaniye.edu.tr/tr/lisansustu/menuler/ogrenci/genel/47321-akademik-takvim')
+('admin_kayit_acik', '0')
 ON DUPLICATE KEY UPDATE `ayar_degeri` = VALUES(`ayar_degeri`);
 
 -- Faculty
 INSERT INTO `bot_fakulteler` (`id`, `ad`, `kod`) VALUES
-(1, 'Osmaniye Meslek Yüksekokulu', 'OMYO');
+(1, 'Örnek Meslek Yüksekokulu', 'ORNEK_MYO');
 
 -- Departments
 INSERT INTO `bot_bolumler` (`id`, `fakulte_id`, `ad`, `kod`) VALUES
@@ -29,7 +33,7 @@ INSERT INTO `bot_bolumler` (`id`, `fakulte_id`, `ad`, `kod`) VALUES
 
 -- Modules (Intents)
 INSERT INTO `bot_moduller` (`id`, `modul_kodu`, `modul_adi`, `cevap_metni`, `aktif_mi`) VALUES
-(1, 'selamlama', 'Gelişmiş Selamlama ve Sohbet', 'Merhaba! Ben MistikAI, OMYO dijital asistanın.', 1),
+(1, 'selamlama', 'Gelişmiş Selamlama ve Sohbet', 'Merhaba! Ben MistikAI, okulunun dijital asistanı.', 1),
 (5, 'argo_filtresi', 'Argo & Küfür Filtresi', 'Lütfen iletişimimizde saygı çerçevesini koruyalım. 🧐', 1),
 (8, 'yemekhane', 'Yemekhane Asistanı', '', 1),
 (9, 'ders_programi', 'Ders Programı Asistanı', '', 1),
@@ -67,10 +71,10 @@ INSERT INTO `bot_anahtar_kelimeler` (`modul_id`, `kelime`, `aktif_mi`, `cevap_ov
 
 -- Sample Course Schedule
 INSERT INTO `bot_ders_programi` (`bolum_id`, `fakulte_id`, `sinif`, `gun`, `baslangic_saati`, `bitis_saati`, `ders_adi`, `ogretim_uyesi`, `derslik`, `aktif`) VALUES
-(1, 1, 1, 'Pazartesi', '08:15:00', '10:00:00', 'BIL114 Bilgisayar Donanımı', 'Öğr. Gör. Mehmet KELEŞ', 'Bilgisayar Lab 2', 1),
-(1, 1, 1, 'Pazartesi', '10:15:00', '12:00:00', 'BIL112 Görsel Programlama 1', 'Dr. Öğr. Üyesi Emre YILDIRIM', 'Bilgisayar Lab 1', 1),
-(1, 1, 1, 'Salı', '08:15:00', '10:00:00', 'BIL118 Veri Tabanı ve Yönetimi 1', 'Öğr. Gör. Mehmet KELEŞ', 'Bilgisayar Lab 2', 1),
-(1, 1, 1, 'Cuma', '09:15:00', '12:00:00', 'BIL120 Web Tasarımının Temelleri', 'Öğr. Gör. Mehmet KELEŞ', 'Bilgisayar Lab 1', 1);
+(1, 1, 1, 'Pazartesi', '08:15:00', '10:00:00', 'BIL114 Bilgisayar Donanımı', 'Öğr. Gör. Ayşe ÖRNEK', 'Bilgisayar Lab 2', 1),
+(1, 1, 1, 'Pazartesi', '10:15:00', '12:00:00', 'BIL112 Görsel Programlama 1', 'Dr. Öğr. Üyesi Can DENEME', 'Bilgisayar Lab 1', 1),
+(1, 1, 1, 'Salı', '08:15:00', '10:00:00', 'BIL118 Veri Tabanı ve Yönetimi 1', 'Öğr. Gör. Ayşe ÖRNEK', 'Bilgisayar Lab 2', 1),
+(1, 1, 1, 'Cuma', '09:15:00', '12:00:00', 'BIL120 Web Tasarımının Temelleri', 'Öğr. Gör. Ayşe ÖRNEK', 'Bilgisayar Lab 1', 1);
 
 -- Sample Meals
 INSERT INTO `bot_zaman_cizelgesi` (`tip`, `baslik`, `detay`, `tarih`) VALUES

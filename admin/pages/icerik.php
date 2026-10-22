@@ -2,6 +2,10 @@
 // admin/pages/icerik.php - Veri havuzu ve kazıyıcı (yemek menüsü, akademik takvim)
 // Kazıyıcı yalnız config/db.php'deki $SCRAPER_IZINLI_HOSTLAR listesindeki alan adlarına gider (liste boşsa kapalı).
 // Her istek ve her yönlendirme adımı Guvenlik::disUrlGuvenli() ile denetlenir; bağlantı doğrulanmış IP'ye sabitlenir.
+// Kaynak adresleri Sistem Ayarları'ndan girilir (yemekhane_url, takvim_url); boşsa kazıma yapılmaz.
+//
+// yemekAyristir() ve takvimAyristir() örnek ayrıştırıcılardır: örnek bir site yapısındaki HTML tablolarına göre
+// yazıldılar (aşağıdaki açıklamalara bakın). Kendi kurumunuzun sayfalarına göre uyarlayın.
 require_once __DIR__ . '/../_baslat.php';
 
 const KAZIMA_MAKS_BAYT = 2 * 1024 * 1024;   // 2 MB
@@ -129,7 +133,12 @@ function parseTrDate(string $text) {
     return sprintf('%04d-%02d-%02d', $yil, $ay, $gun);
 }
 
-/** Akademik takvim tablosunu ayrıştırır: [kayıtlar, atlanan satırlar]. Veritabanına dokunmaz. */
+/**
+ * Akademik takvim tablosunu ayrıştırır: [kayıtlar, atlanan satırlar]. Veritabanına dokunmaz.
+ * Örnek ayrıştırıcı. Beklenen yapı: her <tr> içinde en az üç <td> (başlangıç tarihi, bitiş tarihi, faaliyet),
+ * tarihler "28 Temmuz 2025 Pazartesi" biçiminde; "GÜZ YARIYILI" / "BAHAR YARIYILI" yazan satırlar dönemi değiştirir.
+ * Kurumunuzun takvim sayfası farklıysa bu işlevi uyarlayın.
+ */
 function takvimAyristir(string $html): array {
     $dom = new DOMDocument();
     $onceki = libxml_use_internal_errors(true);
@@ -174,7 +183,11 @@ function takvimAyristir(string $html): array {
     return [$kayitlar, $atlananlar];
 }
 
-/** Yemek menüsü tablosunu ayrıştırır: [[tarih, başlık, detay], ...]. */
+/**
+ * Yemek menüsü tablosunu ayrıştırır: [[tarih, başlık, detay], ...].
+ * Örnek ayrıştırıcı. Beklenen yapı: altı hücreli satırlar — tarih (GG.AA.YYYY), ana yemek, üç yan yemek, kalori.
+ * Kurumunuzun menü sayfası farklıysa bu işlevi uyarlayın.
+ */
 function yemekAyristir(string $html): array {
     $temiz = preg_replace('/\s+/', ' ', $html);
     preg_match_all('/<tr[^>]*>\s*<td>(\d{2}\.\d{2}\.\d{4})<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<\/tr>/is', (string)$temiz, $eslesmeler, PREG_SET_ORDER);
@@ -202,8 +215,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     // 1. Yemek senkronizasyonu: önce ayrıştır, sonra tek işlemde yaz.
     if ($_POST['action'] === 'sync_yemek') {
         try {
-            $url = Panel::ayar($db, 'yemekhane_url', 'https://www.osmaniye.edu.tr/yemekmenu');
-            $menuler = yemekAyristir(guvenliGetir((string)$url));
+            $url = trim((string)Panel::ayar($db, 'yemekhane_url', ''));
+            if ($url === '') {
+                Panel::json(['success' => false, 'message' => 'Yemek menüsü için kaynak adresi tanımlı değil. Sistem Ayarları\'ndan yemekhane menüsü adresini girin.']);
+            }
+            $menuler = yemekAyristir(guvenliGetir($url));
             if (!$menuler) {
                 Panel::json(['success' => false, 'message' => 'Sayfadaki menü tablosu çözülemedi; mevcut veriler korunuyor.']);
             }
@@ -232,7 +248,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'sync_takvim') {
         $url = trim((string)($_POST['takvim_url'] ?? ''));
         if ($url === '') {
-            Panel::json(['success' => false, 'message' => 'URL boş olamaz!']);
+            Panel::json(['success' => false, 'message' => 'Akademik takvim için kaynak adresi tanımlı değil. Takvim sayfasının adresini girin.']);
         }
         try {
             [$kayitlar, $atlananlar] = takvimAyristir(guvenliGetir($url));
@@ -309,7 +325,7 @@ ob_start();
 
     <?php if (!$kazima_acik): ?>
     <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: var(--warning-color); padding: 12px 18px; border-radius: 10px; margin-bottom: 1.5rem;">
-        <i class="fas fa-shield-alt"></i> Veri kazıyıcı kapalı: config/db.php içindeki <code>$SCRAPER_IZINLI_HOSTLAR</code> listesine kazınacak alan adlarını ekleyin (örn. <code>['www.osmaniye.edu.tr']</code>).
+        <i class="fas fa-shield-alt"></i> Veri kazıyıcı kapalı: config/db.php içindeki <code>$SCRAPER_IZINLI_HOSTLAR</code> listesine kazınacak alan adlarını ekleyin (örn. <code>['www.example.edu.tr']</code>).
     </div>
     <?php endif; ?>
 
@@ -357,12 +373,12 @@ ob_start();
             </div>
             <div style="display: flex; gap: 10px; width: 100%;">
                 <?php $takvim_url_ayar = $db->query("SELECT ayar_degeri FROM bot_sistem_ayarlari WHERE ayar_adi = 'takvim_url'")->fetchColumn(); ?>
-                <input type="url" id="takvimUrl" class="modern-input" value="<?php echo Guvenlik::e($takvim_url_ayar ?: ''); ?>" placeholder="Üniversite akademik takvim URL'sini girin...">
+                <input type="url" id="takvimUrl" class="modern-input" value="<?php echo Guvenlik::e($takvim_url_ayar ?: ''); ?>" placeholder="Akademik takvim sayfasının adresi, ör. https://www.example.edu.tr/akademik-takvim">
                 <button onclick="syncTakvim()" class="btn-pasha btn-pasha-blue" id="takvimBtn">
                     <i class="fas fa-spider"></i> VERİYİ KAZI
                 </button>
             </div>
-            <small style="color:var(--text-muted); margin-top:10px; display:block;">Bot, bu URL'ye giderek HTML tablolarını okur ve tarihleri ayıklar. Ay adı tanınmayan satırlar atlanır ve raporlanır.</small>
+            <small style="color:var(--text-muted); margin-top:10px; display:block;">Bot, bu URL'ye giderek HTML tablolarını okur ve tarihleri ayıklar. Ay adı tanınmayan satırlar atlanır ve raporlanır. Ayrıştırıcı örnek bir site yapısına göre yazıldı; kendi sayfanıza göre <code>takvimAyristir()</code> işlevini uyarlayın.</small>
         </div>
         <div class="card-body" style="padding:0; overflow-x:auto;">
             <table class="modern-table">
@@ -410,7 +426,7 @@ async function syncYemek() {
 
 async function syncTakvim() {
     const url = document.getElementById('takvimUrl').value;
-    if(!url) { alert("Lütfen bir URL girin!"); return; }
+    if(!url) { alert("Akademik takvim için kaynak adresi tanımlı değil. Lütfen bir URL girin."); return; }
 
     const btn = document.getElementById('takvimBtn');
     const originalText = btn.innerHTML;

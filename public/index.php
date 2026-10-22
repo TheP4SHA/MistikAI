@@ -2,8 +2,17 @@
 // MistikAI sohbet arayüzü
 // Betik ve stiller public/assets/ altında; satır içi betik yok, CSP 'self' dışındaki betikleri engeller.
 // CSRF jetonu sayfaya gömülür (api.php'nin get_csrf ucu yalnız oturum yenileme içindir).
+// Okul adı config/db.php'deki $OKUL_BILGISI'nden gelir; sayfa yalnız ayarları okur, veritabanına bağlanmaz.
 
 require_once __DIR__ . '/../src/Guvenlik.php';
+require_once __DIR__ . '/../src/LLMClient.php';
+
+define('MISTIK_YALNIZ_AYAR', true);
+$yapilandirma = dirname(__DIR__) . '/config/db.php';
+if (is_file($yapilandirma)) {
+    require_once $yapilandirma;
+}
+$okulAdi = Guvenlik::e(LLMClient::okulAdi($OKUL_BILGISI ?? null));
 
 Guvenlik::oturumBaslat();
 $csrf = Guvenlik::csrfToken();
@@ -42,8 +51,8 @@ $avatar = '<picture>'
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.5, user-scalable=yes">
-    <title>MistikAI · OMYO Akıllı Asistan</title>
-    <meta name="description" content="MistikAI - Osmaniye Meslek Yüksekokulu akıllı dijital kampüs asistanı. Ders programı, yemekhane menüsü ve akademik takvim bilgilerine anında erişin.">
+    <title>MistikAI · <?= $okulAdi ?></title>
+    <meta name="description" content="MistikAI - <?= $okulAdi ?> dijital kampüs asistanı. Ders programı, yemekhane menüsü ve akademik takvim bilgilerine anında erişin.">
     <meta name="csrf-token" content="<?= Guvenlik::e($csrf) ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -74,7 +83,7 @@ $avatar = '<picture>'
             <div class="message-wrapper bot">
                 <div class="msg-avatar" data-avatar></div>
                 <div class="message-bubble">
-                    Merhaba! Ben <strong>MistikAI</strong>, OMYO dijital kampüs asistanıyım.<br><br>
+                    Merhaba! Ben <strong>MistikAI</strong>, <?= $okulAdi ?> için dijital kampüs asistanıyım.<br><br>
                     Ders programı, yemekhane menüsü veya kampüs ile ilgili diğer konularda size yardımcı olabilirim. Ne sormak istersiniz?
                 </div>
             </div>

@@ -69,7 +69,7 @@ class MistikEngine {
             'yedek_model'  => $config['llm_yedek_model'] ?? 'llama-3.1-8b-instant',
             'max_tokens'   => $config['llm_max_tokens'] ?? 400,
             'api_url'      => $config['llm_api_url'] ?? LLMClient::VARSAYILAN_URL,
-            'okul_bilgisi' => $config['okul_bilgisi'] ?? 'Osmaniye Meslek Yüksekokulu (OMYO)',
+            'okul_bilgisi' => $config['okul_bilgisi'] ?? '', // boşsa LLMClient::VARSAYILAN_OKUL
         ]);
         $this->logger = new Logger($db, $this->router->getModules());
     }

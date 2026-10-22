@@ -10,6 +10,9 @@ require_once __DIR__ . '/TarihYardimcisi.php';
 class LLMClient {
     public const VARSAYILAN_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
+    /** $OKUL_BILGISI tanımlı değilse ya da boşsa kullanılan okul adı. */
+    public const VARSAYILAN_OKUL = 'Örnek Meslek Yüksekokulu';
+
     /** Ana menüyü (yetenek listesini) göstermek için modüllerden bağımsız araç. */
     public const MENU_ARACI = 'ana_menuyu_goster';
 
@@ -36,7 +39,13 @@ class LLMClient {
         $this->apiUrl      = (string)($ayar['api_url'] ?? self::VARSAYILAN_URL) ?: self::VARSAYILAN_URL;
         $this->zamanAsimi  = max(2, (int)($ayar['timeout'] ?? 8));
         $this->toplamSure  = (float)($ayar['toplam_sure'] ?? 20);
-        $this->okulBilgisi = (string)($ayar['okul_bilgisi'] ?? 'Osmaniye Meslek Yüksekokulu (OMYO)');
+        $this->okulBilgisi = self::okulAdi($ayar['okul_bilgisi'] ?? null);
+    }
+
+    /** Yapılandırmadaki okul adı ($OKUL_BILGISI); boşsa VARSAYILAN_OKUL. Sohbet sayfası da bunu kullanır. */
+    public static function okulAdi($deger): string {
+        $ad = is_scalar($deger) ? trim((string)$deger) : '';
+        return $ad !== '' ? $ad : self::VARSAYILAN_OKUL;
     }
 
     /**
@@ -263,6 +272,7 @@ class LLMClient {
     /** Sistem mesajı: bugünün tarihi (Europe/Istanbul), okul bilgisi, kısa persona ve kurallar. */
     public static function sistemMesaji(string $okulBilgisi, ?DateTimeInterface $simdi = null): string {
         $simdi = $simdi ?? new DateTimeImmutable('now', new DateTimeZone('Europe/Istanbul'));
+        $okulBilgisi = self::okulAdi($okulBilgisi);
         $tarih = TarihYardimcisi::uzunTarih($simdi) . ', saat ' . $simdi->format('H:i');
 
         return <<<METIN

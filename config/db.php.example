@@ -11,20 +11,24 @@ $DB_NAME = 'mistikai_db';       // Your database name
 $DB_USER = 'your_db_user';      // Your database username
 $DB_PASS = 'your_db_password';  // Your database password
 
-try {
-    global $db;
-    $db = new PDO(
-        "mysql:host=$DB_HOST;dbname=$DB_NAME;charset=utf8mb4",
-        $DB_USER,
-        $DB_PASS,
-        [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES   => false
-        ]
-    );
-} catch (PDOException $e) {
-    exit(json_encode(['reply' => '⚠️ Database connection error.']));
+// The chat page (public/index.php) only reads the settings below. It defines MISTIK_YALNIZ_AYAR
+// before including this file, so no database connection is opened for it.
+if (!defined('MISTIK_YALNIZ_AYAR')) {
+    try {
+        global $db;
+        $db = new PDO(
+            "mysql:host=$DB_HOST;dbname=$DB_NAME;charset=utf8mb4",
+            $DB_USER,
+            $DB_PASS,
+            [
+                PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES   => false
+            ]
+        );
+    } catch (PDOException $e) {
+        exit(json_encode(['reply' => '⚠️ Database connection error.']));
+    }
 }
 
 // ======================================================================
@@ -58,6 +62,6 @@ $DAKIKA_ISTEK_SINIRI = 20;     // Chat requests per minute per client
 $MESAJ_MAX_UZUNLUK = 500;      // Max characters per chat message
 $LOG_SAKLAMA_GUN = 180;        // Chat logs older than this many days are deleted
 
-$OKUL_BILGISI = 'Osmaniye Meslek Yüksekokulu (OMYO)'; // Short description used in the LLM system prompt
+$OKUL_BILGISI = 'Örnek Meslek Yüksekokulu'; // Your school's name: shown on the chat page and used in the LLM system prompt
 $SCRAPER_IZINLI_HOSTLAR = [];  // Hosts the content scraper may fetch, e.g. ['www.example.edu.tr']; empty = scraper disabled
-$REHBER_API_URL = 'https://rehber.osmaniye.edu.tr/rehberdata.php'; // Staff phone directory API used by the telefon_rehberi module
+$REHBER_API_URL = '';          // Staff phone directory API for the telefon_rehberi module, e.g. 'https://rehber.example.edu.tr/api/ara'; empty = module replies "not configured"
