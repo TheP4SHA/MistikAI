@@ -1,0 +1,106 @@
+# Out-of-scope (kapsam_disi) training sentences: one per line, lines starting with # are ignored.
+# Messages the campus modules cannot answer. They teach the model to say
+# "not mine" instead of forcing every message into the closest campus intent.
+# Avoid greetings (selamlama) and campus topics here; add your own freely.
+
+# Sohbet / chit-chat
+bana bir fıkra anlat
+canım çok sıkılıyor
+en sevdiğin renk hangisi
+sen gerçek bir insan mısın
+kaç yaşındasın
+hayatın anlamı ne sence
+bana bir şiir yazar mısın
+beni seviyor musun
+bugün kendimi çok yorgun hissediyorum
+bir bilmece sor bana
+mistik bana bir tavsiye ver
+uyuyamıyorum ne yapayım
+rüyamda yılan gördüm ne anlama gelir
+sevgilimden ayrıldım çok üzgünüm
+hangi takımı tutuyorsun
+
+# Hava durumu
+yarın hava yağmurlu mu
+istanbul'da hava kaç derece
+bu hafta kar yağacak mı
+şemsiye almalı mıyım
+ankara'da hava nasıl olacak
+hafta sonu hava güzel olur mu
+
+# Futbol / spor
+galatasaray dün kaç kaç bitti
+fenerbahçe maçı hangi kanalda
+şampiyonlar ligi kurası ne zaman çekilecek
+dünya kupasını kim kazandı
+milli maç saat kaçta başlıyor
+basketbol maçının skoru ne oldu
+formula 1 yarışını kim kazandı
+
+# Matematik / genel kültür
+iki artı iki kaç eder
+on yedi çarpı yirmi üç kaç
+türev nasıl alınır
+pi sayısının ilk on basamağı nedir
+türkiye'nin başkenti neresi
+everest dağı kaç metre
+dünyanın en uzun nehri hangisi
+ay ile dünya arasındaki mesafe ne kadar
+ışık hızı saniyede kaç kilometre
+osmanlı devleti ne zaman kuruldu
+ingilizcede elma ne demek
+fotosentez nasıl gerçekleşir
+
+# Ekonomi / alışveriş
+dolar kaç tl oldu
+gram altın bugün ne kadar
+bitcoin yükselir mi düşer mi
+en iyi telefon hangisi
+uygun fiyatlı laptop önerir misin
+kargom nerede kaldı
+indirim kodu var mı
+
+# Yemek tarifi (yemekhane değil)
+menemen nasıl yapılır
+kek tarifi verir misin
+evde pizza hamuru nasıl hazırlanır
+akşama ne pişirsem
+senin en sevdiğin yemek ne
+kahve mi çay mı daha sağlıklı
+
+# Sağlık / günlük yaşam
+baş ağrısına ne iyi gelir
+günde kaç litre su içmeliyim
+kilo vermek için ne yapmalıyım
+grip olunca ne yemeli
+saç dökülmesi nasıl durur
+
+# Eğlence / kültür
+bu akşam hangi filmi izlesem
+en iyi dizi önerin ne
+tarkan'ın en güzel şarkısı hangisi
+harry potter kitaplarını kim yazdı
+bana güzel bir roman öner
+hangi oyunu oynasam
+netflix'te yeni ne var
+
+# Teknoloji / genel
+python'da liste nasıl sıralanır
+wifi şifremi unuttum ne yapmalıyım
+telefonum çok ısınıyor
+yapay zeka dünyayı ele geçirecek mi
+chatgpt ile aranızda fark ne
+instagram hesabım kapandı
+
+# Seyahat / şehir
+antalya'ya otobüs bileti ne kadar
+uçak bileti nereden alınır
+kapadokya'da gezilecek yerler neler
+en yakın eczane nerede
+hafta sonu nereye gezmeye gidelim
+
+# Doğa / hayvanlar
+kediler neden mırlar
+köpekler çikolata yiyebilir mi
+dünyanın en hızlı hayvanı hangisi
+gökkuşağı nasıl oluşur

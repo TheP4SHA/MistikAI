@@ -1,12 +1,13 @@
 <?php
 // Ders Programı Modülü - Eklenti Dosyası
 // Mevcut Değişkenler: $this (Motor Nesnesi), $clean_input, $raw_input, $this->db (Veritabanı)
+// Bölüm/sınıf seçimi $_SESSION['context'] içinde tutulur (motor: set_program_<bolum>_<sinif>).
 
 // 1. Hafızadaki (Session) bilgileri al
-$context = $_SESSION['context'] ?? [];
-$bolum_std = $context['bolum'] ?? null; 
-$sinif = $context['sinif'] ?? null; 
-$bolum_id = $context['bolum_id'] ?? null;
+$context = is_array($_SESSION['context'] ?? null) ? $_SESSION['context'] : [];
+$bolum_std = isset($context['bolum']) ? (string)$context['bolum'] : null;
+$sinif = isset($context['sinif']) ? (int)$context['sinif'] : null;
+$bolum_id = isset($context['bolum_id']) ? (int)$context['bolum_id'] : null;
 
 // 2. Eksik bilgi varsa kullanıcıya sor (Dinamik Butonlarla)
 if ((!$bolum_std && !$bolum_id) || !$sinif) {
@@ -19,10 +20,10 @@ if ((!$bolum_std && !$bolum_id) || !$sinif) {
     
     $buttons = [];
     foreach ($combos as $combo) {
-        $safe_ad = htmlspecialchars((string)$combo['bolum_adi'], ENT_QUOTES, 'UTF-8');
-        $text = $safe_ad . ' ' . $combo['sinif'] . '. Sınıf';
-        $payload = "set_program_" . $combo['bolum_id'] . '_' . $combo['sinif'];
-        $buttons[] = ['text' => htmlspecialchars_decode($text), 'payload' => $payload];
+        // Buton metni istemcide textContent ile yazılır; kaçış gerekmez.
+        $text = $combo['bolum_adi'] . ' ' . (int)$combo['sinif'] . '. Sınıf';
+        $payload = "set_program_" . (int)$combo['bolum_id'] . '_' . (int)$combo['sinif'];
+        $buttons[] = ['text' => $text, 'payload' => $payload];
     }
     return $this->response("Hangi bölüm ve sınıfın ders programını öğrenmek istersiniz?", $buttons);
 }
@@ -46,15 +47,14 @@ if (!$bolum_id) {
 }
 
 // 4. Niyet Analizi: Tüm haftayı mı soruyor, belli bir günü mü?
-$tum_program_mi = (strpos($clean_input, 'tum') !== false || strpos($clean_input, 'butun') !== false || strpos($clean_input, 'haftalik') !== false || strpos($clean_input, 'hepsi') !== false);
+// $clean_input küçük harfli, noktalamasız ve ASCII katlanmıştır ("Salı" → "sali"); kelime sınırıyla bakılır.
+$tum_program_mi = (bool)preg_match('/\b(tum|butun|haftalik|hafta|hepsi|hepsini)\b/', $clean_input);
 
-// Gün Çevirici Yardımcı Fonksiyon
-if (!function_exists('getGunAdiDers')) {
-    function getGunAdiDers($index) {
-        $gunler = [1=>'Pazartesi', 2=>'Salı', 3=>'Çarşamba', 4=>'Perşembe', 5=>'Cuma', 6=>'Cumartesi', 7=>'Pazar'];
-        return $gunler[$index] ?? '';
-    }
-}
+// Bölüm değiştirme butonu her cevabın altında
+$program_butonlari = [
+    ['text' => '📅 Haftalık program', 'payload' => 'modul_ders_programi'],
+    ['text' => '🔁 Bölüm/sınıf değiştir', 'payload' => 'set_program_sifirla'],
+];
 
 // A) TÜM HAFTALIK PROGRAM İSTENİYORSA
 if ($tum_program_mi) {
@@ -63,7 +63,7 @@ if ($tum_program_mi) {
     $tum_dersler = $stmt->fetchAll();
     
     if (empty($tum_dersler)) {
-        return $this->response("<b>{$bolum_adi} {$sinif}. Sınıf</b> için sisteme kayıtlı ders bulunamadı.");
+        return $this->response("<b>{$bolum_adi} {$sinif}. Sınıf</b> için sisteme kayıtlı ders bulunamadı.", [$program_butonlari[1]]);
     }
 
     $cevap = "📚 <b>{$bolum_adi} - {$sinif}. Sınıf Haftalık Program:</b><br>"; 
@@ -81,28 +81,30 @@ if ($tum_program_mi) {
         
         $cevap .= "🕒 {$bas}-{$bit} | 📖 {$safe_adi} | 📍 {$safe_yer}<br>";
     }
-    return $this->response($cevap);
+    return $this->response($cevap, [$program_butonlari[1]]);
 }
 
 // B) BELİRLİ BİR GÜN VEYA BUGÜN/YARIN İSTENİYORSA
-$hedef_gun = getGunAdiDers(date('N')); 
+// Gün adı TarihYardimcisi ile çözülür: "cumartesi" asla "Cuma" olmaz, "Pazartesi" doğru yazılır, "salı/sali" tanınır.
+$hedef_gun = TarihYardimcisi::gunAdi((int)date('N'));
 $zaman_etiketi = "Bugün";
 
-if (strpos($clean_input, 'yarin') !== false) { 
-    $hedef_gun = getGunAdiDers(date('N', strtotime('+1 day'))); 
-    $zaman_etiketi = "Yarın"; 
-} elseif (preg_match('/(pazartesi|sali|carsamba|persembe|cuma|cumartesi|pazar)/u', $clean_input, $m)) {
-    $hedef_gun = ucfirst($m[1]); 
-    $hedef_gun = str_replace(['i','sali','carsamba','persembe','cuma','cumartesi','pazar'], ['ı','Salı','Çarşamba','Perşembe','Cuma','Cumartesi','Pazar'], $hedef_gun); 
+$goreli = TarihYardimcisi::goreliGun($clean_input);
+$istenen_gun = TarihYardimcisi::gunBul($clean_input);
+if ($goreli !== null && $goreli !== 0) {
+    $hedef_gun = TarihYardimcisi::gunAdi((int)date('N', strtotime(($goreli > 0 ? '+' : '') . $goreli . ' day')));
+    $zaman_etiketi = [1 => 'Yarın', 2 => 'Öbür gün', -1 => 'Dün'][$goreli] ?? $hedef_gun;
+} elseif ($istenen_gun !== null) {
+    $hedef_gun = $istenen_gun;
     $zaman_etiketi = $hedef_gun;
-} 
+}
 
 $stmt = $this->db->prepare("SELECT * FROM bot_ders_programi WHERE bolum_id = :bid AND sinif = :sinif AND gun = :gun AND aktif = 1 ORDER BY baslangic_saati ASC");
 $stmt->execute([':bid' => $bolum_id, ':sinif' => $sinif, ':gun' => $hedef_gun]); 
 $dersler = $stmt->fetchAll();
 
 if (empty($dersler)) {
-    return $this->response("<b>{$bolum_adi} {$sinif}. Sınıf</b> için {$zaman_etiketi} günü ders bulunamadı.");
+    return $this->response("<b>{$bolum_adi} {$sinif}. Sınıf</b> için {$zaman_etiketi} ({$hedef_gun}) ders bulunamadı. 🎉", $program_butonlari);
 }
 
 $cevap = "📚 <b>{$bolum_adi} - {$sinif}. Sınıf</b><br>🗓️ <b>{$zaman_etiketi} Programı:</b><br><br>";
@@ -116,5 +118,4 @@ foreach ($dersler as $d) {
     $cevap .= "🕒 <b>{$bas} - {$bit}</b><br>📖 <b>{$safe_adi}</b><br>👤 <small>{$safe_hoca}</small><br>📍 <small>{$safe_yer}</small><br>────────────────<br>";
 }
 
-return $this->response($cevap);
-?>
+return $this->response($cevap, $program_butonlari);

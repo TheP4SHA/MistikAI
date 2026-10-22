@@ -1,175 +1,273 @@
 <?php
-// /data/admin/front/icerik.php
+// admin/pages/icerik.php - Veri havuzu ve kazıyıcı (yemek menüsü, akademik takvim)
+// Kazıyıcı yalnız config/db.php'deki $SCRAPER_IZINLI_HOSTLAR listesindeki alan adlarına gider (liste boşsa kapalı).
+// Her istek ve her yönlendirme adımı Guvenlik::disUrlGuvenli() ile denetlenir; bağlantı doğrulanmış IP'ye sabitlenir.
+require_once __DIR__ . '/../_baslat.php';
 
-// GÜVENLİK DUVARI: Oturum yoksa logine şutla
-if (session_status() === PHP_SESSION_NONE) { session_start(); }
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: /OmyoWeb/MistikAI/admin/login");
-    exit;
+const KAZIMA_MAKS_BAYT = 2 * 1024 * 1024;   // 2 MB
+const KAZIMA_MAKS_YONLENDIRME = 3;
+const TR_AYLAR = [
+    'ocak' => 1, 'subat' => 2, 'mart' => 3, 'nisan' => 4, 'mayis' => 5, 'haziran' => 6,
+    'temmuz' => 7, 'agustos' => 8, 'eylul' => 9, 'ekim' => 10, 'kasim' => 11, 'aralik' => 12,
+];
+
+/** Kullanıcıya olduğu gibi gösterilebilecek kazıma hatası (iç ayrıntı içermez). */
+final class KazimaHatasi extends RuntimeException {}
+
+function kazimaHostlari(): array {
+    return array_values(array_filter(array_map('strval', (array)($GLOBALS['SCRAPER_IZINLI_HOSTLAR'] ?? []))));
 }
 
-// 1. YOL DÜZELTMESİ: Kök dizin (Artık sadece /data kullanılıyor)
-$doc_root = $_SERVER['DOCUMENT_ROOT']; // /var/www/html/
-$base_path = $doc_root . '/OmyoWeb/MistikAI/data';
-
-// Autoload Yolu (Yeni Klasör Yapısı)
-$vendor_path = $base_path . '/vendor/autoload.php';
-if (file_exists($vendor_path)) { require_once $vendor_path; }
-
-// Veritabanı Yolu (Mutlak Yol)
-$db_path = $base_path . '/config/db.php';
-if (file_exists($db_path)) {
-    require_once $db_path;
-} else {
-    // Eğer config/db.php yoksa, canlı FOG sunucusuna varsayılan bilgilerle bağlan
-    try {
-        require_once __DIR__ . '/../../config/db.php';
-        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        die("Veritabanı bağlantı hatası!");
+/** Hostun genel (özel/ayrılmış olmayan) bir IP'si; bağlantı bu IP'ye sabitlenir (DNS rebinding'e karşı). */
+function kazimaIp(string $host): ?string {
+    $genel = fn($ip) => (bool)filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+    $host = trim($host, '[]');
+    if (filter_var($host, FILTER_VALIDATE_IP)) {
+        return $genel($host) ? $host : null;
     }
-}
-global $db;
-
-// Türkçe tarih metinlerini (Örn: "28 Temmuz 2025 Pazartesi") SQL formatına (YYYY-MM-DD) çeviren zeki fonksiyon
-function parseTrDate($text) {
-    $months = [
-        'Ocak'=>'01', 'Şubat'=>'02', 'Mart'=>'03', 'Nisan'=>'04', 'Mayıs'=>'05', 'Haziran'=>'06', 
-        'Temmuz'=>'07', 'Ağustos'=>'08', 'Eylül'=>'09', 'Ekim'=>'10', 'Kasım'=>'11', 'Aralık'=>'12',
-        'Subat'=>'02', 'Mayis'=>'05', 'Agustos'=>'08', 'Eylul'=>'09', 'Kasim'=>'11', 'Aralik'=>'12'
-    ];
-    
-    // Rakam + Ay Adı + Yıl arayan Regex
-    if (preg_match('/(\d{1,2})\s+([a-zA-ZçÇğĞıİöÖşŞüÜ]+)\s+(\d{4})/ui', $text, $matches)) {
-        $d = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
-        $m_str = mb_convert_case($matches[2], MB_CASE_TITLE, "UTF-8");
-        $y = $matches[3];
-        $mo = isset($months[$m_str]) ? $months[$m_str] : '01';
-        return "$y-$mo-$d";
+    $adaylar = array_merge((array)@gethostbynamel($host), array_column((array)@dns_get_record($host, DNS_AAAA), 'ipv6'));
+    foreach (array_filter($adaylar) as $ip) {
+        if ($genel($ip)) {
+            return $ip;
+        }
     }
     return null;
+}
+
+/**
+ * SSRF'e karşı korumalı GET: yalnız http/https, otomatik yönlendirme yok (her adım elle yeniden denetlenir),
+ * SSL doğrulaması açık, zaman aşımı ve en fazla KAZIMA_MAKS_BAYT yanıt.
+ */
+function guvenliGetir(string $url): string {
+    $hostlar = kazimaHostlari();
+    if (!$hostlar) {
+        throw new KazimaHatasi('Veri kazıyıcı kapalı: config/db.php içindeki $SCRAPER_IZINLI_HOSTLAR listesine izinli alan adlarını ekleyin.');
+    }
+    for ($adim = 0; $adim <= KAZIMA_MAKS_YONLENDIRME; $adim++) {
+        if (!Guvenlik::disUrlGuvenli($url, $hostlar)) {
+            throw new KazimaHatasi('Bu adres kazıma için izinli değil. Yalnız http/https, $SCRAPER_IZINLI_HOSTLAR listesindeki alan adları ve genel IP adresleri kabul edilir.');
+        }
+        $p = parse_url($url);
+        $host = (string)$p['host'];
+        $port = (int)($p['port'] ?? (strtolower((string)$p['scheme']) === 'https' ? 443 : 80));
+        $ip = kazimaIp($host);
+        if ($ip === null) {
+            throw new KazimaHatasi('Adresin IP\'si doğrulanamadı.');
+        }
+
+        $govde = '';
+        $asim = false;
+        $ch = curl_init($url);
+        $ayarlar = [
+            CURLOPT_PROTOCOLS       => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_FOLLOWLOCATION  => false,
+            CURLOPT_SSL_VERIFYPEER  => true,
+            CURLOPT_SSL_VERIFYHOST  => 2,
+            CURLOPT_CONNECTTIMEOUT  => 5,
+            CURLOPT_TIMEOUT         => 20,
+            CURLOPT_USERAGENT       => 'MistikAI-Kaziyici/1.1',
+            CURLOPT_ENCODING        => '',
+            CURLOPT_WRITEFUNCTION   => function ($ch, string $parca) use (&$govde, &$asim): int {
+                if (strlen($govde) + strlen($parca) > KAZIMA_MAKS_BAYT) {
+                    $asim = true;
+                    return 0; // aktarımı keser
+                }
+                $govde .= $parca;
+                return strlen($parca);
+            },
+        ];
+        if (!filter_var(trim($host, '[]'), FILTER_VALIDATE_IP)) {
+            $ayarlar[CURLOPT_RESOLVE] = [$host . ':' . $port . ':' . (strpos($ip, ':') !== false ? '[' . $ip . ']' : $ip)];
+        }
+        curl_setopt_array($ch, $ayarlar);
+        $sonuc = curl_exec($ch);
+        $kod = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $sonraki = (string)curl_getinfo($ch, CURLINFO_REDIRECT_URL);
+        $curlHata = curl_error($ch);
+        curl_close($ch);
+
+        if ($asim) {
+            throw new KazimaHatasi('Yanıt çok büyük (en fazla ' . (KAZIMA_MAKS_BAYT >> 20) . ' MB).');
+        }
+        if ($sonuc === false) {
+            error_log('[MistikAI admin] kazıma hatası (' . $url . '): ' . $curlHata);
+            throw new KazimaHatasi('Adrese bağlanılamadı (zaman aşımı, SSL ya da ağ hatası). Ayrıntı sunucu günlüğünde.');
+        }
+        if ($kod >= 300 && $kod < 400 && $sonraki !== '') {
+            $url = $sonraki; // bir sonraki turda yeniden denetlenir
+            continue;
+        }
+        if ($kod !== 200) {
+            throw new KazimaHatasi('Kaynak sunucu HTTP ' . $kod . ' döndürdü.');
+        }
+        return $govde;
+    }
+    throw new KazimaHatasi('Çok fazla yönlendirme.');
+}
+
+/** Ay adını karşılaştırma anahtarına çevirir: Türkçe büyük/küçük harf + ASCII katlama ("MAYIS", "Mayıs" → "mayis"). */
+function ayAnahtari(string $s): string {
+    $s = mb_strtolower(str_replace(['İ', 'I'], ['i', 'ı'], $s), 'UTF-8');
+    return strtr($s, ['ı' => 'i', 'ş' => 's', 'ğ' => 'g', 'ü' => 'u', 'ö' => 'o', 'ç' => 'c']);
+}
+
+/**
+ * Türkçe tarih metnini ("28 Temmuz 2025 Pazartesi") 'YYYY-MM-DD' yapar.
+ * Metinde tarih yoksa null; ay adı tanınmıyorsa ya da tarih geçersizse false (satır atlanır ve raporlanır).
+ */
+function parseTrDate(string $text) {
+    if (!preg_match('/(\d{1,2})\s+([a-zA-ZçÇğĞıİöÖşŞüÜ]+)\s+(\d{4})/u', $text, $m)) {
+        return null;
+    }
+    $ay = TR_AYLAR[ayAnahtari($m[2])] ?? null;
+    $gun = (int)$m[1];
+    $yil = (int)$m[3];
+    if ($ay === null || !checkdate($ay, $gun, $yil)) {
+        return false;
+    }
+    return sprintf('%04d-%02d-%02d', $yil, $ay, $gun);
+}
+
+/** Akademik takvim tablosunu ayrıştırır: [kayıtlar, atlanan satırlar]. Veritabanına dokunmaz. */
+function takvimAyristir(string $html): array {
+    $dom = new DOMDocument();
+    $onceki = libxml_use_internal_errors(true);
+    $dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_NONET);
+    libxml_clear_errors();
+    libxml_use_internal_errors($onceki);
+    $xpath = new DOMXPath($dom);
+
+    $kayitlar = [];
+    $atlananlar = [];
+    $yariyil = 'Güz';
+    foreach ($xpath->query('//table//tr') as $row) {
+        $cells = $xpath->query('.//td', $row);
+        if ($cells->length >= 1) {
+            $ilk = trim($cells->item(0)->textContent);
+            if (mb_stripos($ilk, 'GÜZ YARIYILI') !== false) { $yariyil = 'Güz'; continue; }
+            if (mb_stripos($ilk, 'BAHAR YARIYILI') !== false) { $yariyil = 'Bahar'; continue; }
+        }
+        if ($cells->length < 3) {
+            continue;
+        }
+        $bas_text = trim($cells->item(0)->textContent);
+        $bit_text = trim($cells->item(1)->textContent);
+        $faaliyet = trim(preg_replace('/\s+/u', ' ', $cells->item(2)->textContent));
+        if ($faaliyet === '' || mb_stripos($bas_text, 'BAŞLANGIÇ') !== false) {
+            continue;
+        }
+
+        $bas = parseTrDate($bas_text);
+        $bit = parseTrDate($bit_text);
+        if ($bas === false || $bit === false) {
+            $atlananlar[] = mb_substr($faaliyet, 0, 60, 'UTF-8') . ' (' . trim($bas_text . ' / ' . $bit_text, ' /') . ')';
+            continue;
+        }
+        if (!$bas && $bit) { $bas = $bit; }
+        if ($bas && !$bit) { $bit = $bas; }
+        if (!$bas) {
+            continue;
+        }
+        $kayitlar[] = [$yariyil, $bas, $bit, mb_substr($faaliyet, 0, 255, 'UTF-8')];
+    }
+    return [$kayitlar, $atlananlar];
+}
+
+/** Yemek menüsü tablosunu ayrıştırır: [[tarih, başlık, detay], ...]. */
+function yemekAyristir(string $html): array {
+    $temiz = preg_replace('/\s+/', ' ', $html);
+    preg_match_all('/<tr[^>]*>\s*<td>(\d{2}\.\d{2}\.\d{4})<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<\/tr>/is', (string)$temiz, $eslesmeler, PREG_SET_ORDER);
+    $metin = fn($h) => trim(html_entity_decode(strip_tags($h), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    $sonuc = [];
+    foreach ($eslesmeler as $row) {
+        [$g, $a, $y] = array_map('intval', explode('.', $row[1]));
+        if (!checkdate($a, $g, $y)) {
+            continue;
+        }
+        $sonuc[] = [
+            sprintf('%04d-%02d-%02d', $y, $a, $g),
+            mb_substr($metin($row[2]), 0, 255, 'UTF-8'),
+            $metin($row[3]) . ', ' . $metin($row[4]) . ', ' . $metin($row[5]) . ' (' . $metin($row[6]) . ' kcal)',
+        ];
+    }
+    return $sonuc;
 }
 
 // ======================================================================
 // AJAX İŞLEMLERİ (YEMEK VE TAKVİM)
 // ======================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    header('Content-Type: application/json; charset=utf-8');
 
-    // 1. YEMEK SENKRONİZASYONU
+    // 1. Yemek senkronizasyonu: önce ayrıştır, sonra tek işlemde yaz.
     if ($_POST['action'] === 'sync_yemek') {
         try {
-            $ayar = $db->query("SELECT ayar_degeri FROM bot_sistem_ayarlari WHERE ayar_adi = 'yemekhane_url'")->fetchColumn();
-            $url = $ayar ? $ayar : "https://www.osmaniye.edu.tr/yemekmenu";
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, $url);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-            curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
-            $html = curl_exec($ch);
-            curl_close($ch);
-
-            $clean_html = preg_replace('/\s+/', ' ', $html);
-            preg_match_all('/<tr[^>]*>\s*<td>(\d{2}\.\d{2}\.\d{4})<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<\/tr>/is', $clean_html, $matches, PREG_SET_ORDER);
-
-            if (empty($matches)) { echo json_encode(['success' => false, 'message' => "Format çözülemedi!"]); exit; }
-
+            $url = Panel::ayar($db, 'yemekhane_url', 'https://www.osmaniye.edu.tr/yemekmenu');
+            $menuler = yemekAyristir(guvenliGetir((string)$url));
+            if (!$menuler) {
+                Panel::json(['success' => false, 'message' => 'Sayfadaki menü tablosu çözülemedi; mevcut veriler korunuyor.']);
+            }
             $added = 0; $updated = 0;
-            foreach ($matches as $row) {
-                $raw_tarih = trim($row[1]); 
-                $d = explode('.', $raw_tarih);
-                $tarih_sql = "{$d[2]}-{$d[1]}-{$d[0]}";
-                $baslik = html_entity_decode(trim(strip_tags($row[2])));
-                $detay = html_entity_decode(trim(strip_tags($row[3])).", ".trim(strip_tags($row[4])).", ".trim(strip_tags($row[5]))." (".trim(strip_tags($row[6]))." kcal)");
-
-                $check = $db->prepare("SELECT id FROM bot_zaman_cizelgesi WHERE tip='yemek' AND tarih = ?");
-                $check->execute([$tarih_sql]);
-                $exists = $check->fetch();
-                if ($exists) {
-                    $db->prepare("UPDATE bot_zaman_cizelgesi SET baslik = ?, detay = ? WHERE id = ?")->execute([$baslik, $detay, $exists['id']]);
-                    $updated++;
-                } else {
-                    $db->prepare("INSERT INTO bot_zaman_cizelgesi (tip, baslik, detay, tarih) VALUES ('yemek', ?, ?, ?)")->execute([$baslik, $detay, $tarih_sql]);
-                    $added++;
-                }
+            $check = $db->prepare("SELECT id FROM bot_zaman_cizelgesi WHERE tip = 'yemek' AND tarih = ?");
+            $upd = $db->prepare("UPDATE bot_zaman_cizelgesi SET baslik = ?, detay = ? WHERE id = ?");
+            $ins = $db->prepare("INSERT INTO bot_zaman_cizelgesi (tip, baslik, detay, tarih) VALUES ('yemek', ?, ?, ?)");
+            $db->beginTransaction();
+            foreach ($menuler as [$tarih, $baslik, $detay]) {
+                $check->execute([$tarih]);
+                $id = $check->fetchColumn();
+                if ($id) { $upd->execute([$baslik, $detay, $id]); $updated++; }
+                else { $ins->execute([$baslik, $detay, $tarih]); $added++; }
             }
-            echo json_encode(['success' => true, 'message' => "Ziyafet listesi güncellendi! ($added yeni, $updated güncel)"]);
-        } catch(Exception $e) { echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
-        exit;
+            $db->commit();
+            Panel::json(['success' => true, 'message' => "Ziyafet listesi güncellendi! ($added yeni, $updated güncel)"]);
+        } catch (KazimaHatasi $e) {
+            Panel::json(['success' => false, 'message' => $e->getMessage()]);
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) { $db->rollBack(); }
+            Panel::json(['success' => false, 'message' => Panel::hata($e, 'yemek kazıma')]);
+        }
     }
 
-    // 2. AKADEMİK TAKVİM SENKRONİZASYONU
+    // 2. Akademik takvim: önce ayrıştır; en az bir kayıt varsa eski takvimi tek işlemde değiştir.
     if ($_POST['action'] === 'sync_takvim') {
-        $url = trim($_POST['takvim_url']);
-        if (empty($url)) { echo json_encode(['success'=>false, 'message'=>'URL boş olamaz!']); exit; }
-
+        $url = trim((string)($_POST['takvim_url'] ?? ''));
+        if ($url === '') {
+            Panel::json(['success' => false, 'message' => 'URL boş olamaz!']);
+        }
         try {
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, $url);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-            curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
-            $html = curl_exec($ch);
-            curl_close($ch);
-
-            $dom = new DOMDocument();
-            @$dom->loadHTML(mb_convert_encoding($html, 'HTML-ENTITIES', 'UTF-8'));
-            $xpath = new DOMXPath($dom);
-            $rows = $xpath->query('//table//tr'); 
-
-            if ($rows->length === 0) {
-                echo json_encode(['success' => false, 'message' => "Girilen linkte geçerli bir HTML tablosu bulunamadı."]);
-                exit;
+            [$kayitlar, $atlananlar] = takvimAyristir(guvenliGetir($url));
+            if (!$kayitlar) {
+                Panel::json(['success' => false, 'message' => 'Sayfada tarihli bir takvim tablosu bulunamadı; mevcut takvim korunuyor.', 'atlananlar' => $atlananlar]);
             }
-
-            $db->exec("TRUNCATE TABLE bot_akademik_takvim");
-
-            $added = 0;
-            $current_yariyil = 'Güz'; 
-
-            foreach($rows as $row) {
-                $cells = $xpath->query('.//td', $row);
-                
-                if ($cells->length >= 1) {
-                    $text = trim($cells->item(0)->textContent);
-                    if (mb_stripos($text, 'GÜZ YARIYILI') !== false) { $current_yariyil = 'Güz'; continue; }
-                    if (mb_stripos($text, 'BAHAR YARIYILI') !== false) { $current_yariyil = 'Bahar'; continue; }
-                }
-
-                if ($cells->length >= 3) {
-                    $bas_text = trim($cells->item(0)->textContent);
-                    $bit_text = trim($cells->item(1)->textContent);
-                    $faaliyet = trim($cells->item(2)->textContent);
-
-                    if (mb_stripos($bas_text, 'BAŞLANGIÇ') !== false || empty($faaliyet)) continue;
-
-                    $bas_date = parseTrDate($bas_text);
-                    $bit_date = parseTrDate($bit_text);
-
-                    if (!$bas_date && $bit_date) { $bas_date = $bit_date; }
-                    if ($bas_date && !$bit_date) { $bit_date = $bas_date; }
-                    
-                    if (!$bas_date && !$bit_date) continue;
-
-                    $ins = $db->prepare("INSERT INTO bot_akademik_takvim (yariyil, baslangic_tarihi, bitis_tarihi, faaliyet) VALUES (?, ?, ?, ?)");
-                    $ins->execute([$current_yariyil, $bas_date, $bit_date, $faaliyet]);
-                    $added++;
-                }
+            $ins = $db->prepare("INSERT INTO bot_akademik_takvim (yariyil, baslangic_tarihi, bitis_tarihi, faaliyet) VALUES (?, ?, ?, ?)");
+            $db->beginTransaction();
+            $db->exec("DELETE FROM bot_akademik_takvim"); // TRUNCATE işlemi örtük olarak commit eder; DELETE geri alınabilir.
+            foreach ($kayitlar as $k) {
+                $ins->execute($k);
             }
-            echo json_encode(['success' => true, 'message' => "Takvim başarıyla tarandı! Toplam $added etkinlik sisteme işlendi."]);
-        } catch (Exception $e) { echo json_encode(['success' => false, 'message' => 'Hata: ' . $e->getMessage()]); }
-        exit;
+            $db->commit();
+            $mesaj = 'Takvim başarıyla tarandı! Toplam ' . count($kayitlar) . ' etkinlik sisteme işlendi.';
+            if ($atlananlar) {
+                $mesaj .= "\n" . count($atlananlar) . " satır tanınmayan ay adı ya da geçersiz tarih yüzünden atlandı:\n- "
+                        . implode("\n- ", array_slice($atlananlar, 0, 10)) . (count($atlananlar) > 10 ? "\n- ..." : '');
+            }
+            Panel::json(['success' => true, 'message' => $mesaj, 'atlananlar' => $atlananlar]);
+        } catch (KazimaHatasi $e) {
+            Panel::json(['success' => false, 'message' => $e->getMessage()]);
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) { $db->rollBack(); }
+            Panel::json(['success' => false, 'message' => Panel::hata($e, 'takvim kazıma')]);
+        }
     }
+
+    Panel::json(['success' => false, 'message' => 'Bilinmeyen işlem.'], 400);
 }
+
+$kazima_acik = (bool)kazimaHostlari();
 
 $page_title = "Veri Havuzu & Scraper";
 $active_menu = "icerik";
-$tab = isset($_GET['tab']) ? $_GET['tab'] : 'yemek';
+$tab = ($_GET['tab'] ?? '') === 'takvim' ? 'takvim' : 'yemek';
 
 ob_start();
 ?>
@@ -209,10 +307,16 @@ ob_start();
         <p style="color:var(--text-muted);">Veri Havuzu ve Canlı Bot Scraper Yönetimi</p>
     </div>
 
+    <?php if (!$kazima_acik): ?>
+    <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: var(--warning-color); padding: 12px 18px; border-radius: 10px; margin-bottom: 1.5rem;">
+        <i class="fas fa-shield-alt"></i> Veri kazıyıcı kapalı: config/db.php içindeki <code>$SCRAPER_IZINLI_HOSTLAR</code> listesine kazınacak alan adlarını ekleyin (örn. <code>['www.osmaniye.edu.tr']</code>).
+    </div>
+    <?php endif; ?>
+
     <div class="hub-nav">
-        <a href="icerik?tab=yemek" class="hub-tab <?php echo $tab == 'yemek' ? 'active' : ''; ?>">🍱 YEMEKHANE</a>
-        <a href="icerik?tab=takvim" class="hub-tab <?php echo $tab == 'takvim' ? 'active' : ''; ?>">📅 AKADEMİK TAKVİM</a>
-        <a href="ders" class="hub-tab">📚 DERS PROGRAMI</a>
+        <a href="<?php echo Guvenlik::e(Panel::url('icerik', ['tab' => 'yemek'])); ?>" class="hub-tab <?php echo $tab == 'yemek' ? 'active' : ''; ?>">🍱 YEMEKHANE</a>
+        <a href="<?php echo Guvenlik::e(Panel::url('icerik', ['tab' => 'takvim'])); ?>" class="hub-tab <?php echo $tab == 'takvim' ? 'active' : ''; ?>">📅 AKADEMİK TAKVİM</a>
+        <a href="<?php echo Guvenlik::e(Panel::url('ders')); ?>" class="hub-tab">📚 DERS PROGRAMI</a>
     </div>
 
     <?php if ($tab == 'yemek'): ?>
@@ -235,8 +339,8 @@ ob_start();
                         foreach($list as $l): ?>
                         <tr>
                             <td style="color:var(--accent-color); font-weight:bold; white-space:nowrap;"><?php echo date('d.m.Y', strtotime($l['tarih'])); ?></td>
-                            <td style="font-weight:700;"><?php echo htmlspecialchars($l['baslik']); ?></td>
-                            <td style="color:var(--text-muted); font-size:0.85rem;"><?php echo htmlspecialchars($l['detay']); ?></td>
+                            <td style="font-weight:700;"><?php echo Guvenlik::e($l['baslik']); ?></td>
+                            <td style="color:var(--text-muted); font-size:0.85rem;"><?php echo Guvenlik::e($l['detay']); ?></td>
                         </tr>
                         <?php endforeach; 
                     endif; ?>
@@ -253,12 +357,12 @@ ob_start();
             </div>
             <div style="display: flex; gap: 10px; width: 100%;">
                 <?php $takvim_url_ayar = $db->query("SELECT ayar_degeri FROM bot_sistem_ayarlari WHERE ayar_adi = 'takvim_url'")->fetchColumn(); ?>
-                <input type="url" id="takvimUrl" class="modern-input" value="<?php echo htmlspecialchars($takvim_url_ayar ?: ''); ?>" placeholder="Üniversite akademik takvim URL'sini girin...">
+                <input type="url" id="takvimUrl" class="modern-input" value="<?php echo Guvenlik::e($takvim_url_ayar ?: ''); ?>" placeholder="Üniversite akademik takvim URL'sini girin...">
                 <button onclick="syncTakvim()" class="btn-pasha btn-pasha-blue" id="takvimBtn">
                     <i class="fas fa-spider"></i> VERİYİ KAZI
                 </button>
             </div>
-            <small style="color:var(--text-muted); margin-top:10px; display:block;">Bot, bu URL'ye giderek HTML tablolarını okur ve tarihleri ayıklar.</small>
+            <small style="color:var(--text-muted); margin-top:10px; display:block;">Bot, bu URL'ye giderek HTML tablolarını okur ve tarihleri ayıklar. Ay adı tanınmayan satırlar atlanır ve raporlanır.</small>
         </div>
         <div class="card-body" style="padding:0; overflow-x:auto;">
             <table class="modern-table">
@@ -276,9 +380,9 @@ ob_start();
                             $tarih_text = ($bas == $bit) ? $bas : "$bas - $bit";
                         ?>
                         <tr>
-                            <td><span class="badge <?php echo $badge; ?>"><?php echo htmlspecialchars($l['yariyil']); ?> Yarıyılı</span></td>
+                            <td><span class="badge <?php echo $badge; ?>"><?php echo Guvenlik::e($l['yariyil']); ?> Yarıyılı</span></td>
                             <td style="color:#ddd; font-weight:600; white-space:nowrap;"><?php echo $tarih_text; ?></td>
-                            <td style="color:var(--text-muted); font-size:0.95rem; font-weight:500;"><?php echo htmlspecialchars($l['faaliyet']); ?></td>
+                            <td style="color:var(--text-muted); font-size:0.95rem; font-weight:500;"><?php echo Guvenlik::e($l['faaliyet']); ?></td>
                         </tr>
                         <?php endforeach; 
                     endif; ?>
@@ -297,8 +401,7 @@ async function syncYemek() {
     
     const fd = new FormData(); fd.append('action', 'sync_yemek');
     try {
-        const res = await fetch('icerik?tab=yemek', { method: 'POST', body: fd });
-        const data = await res.json();
+        const data = await MISTIK.istek('icerik', fd, {tab: 'yemek'});
         if (data.success) { alert('✅ ' + data.message); location.reload(); } 
         else { alert('❌ ' + data.message); }
     } catch (e) { alert('Sunucu hatası!'); } 
@@ -318,8 +421,7 @@ async function syncTakvim() {
     fd.append('takvim_url', url);
 
     try {
-        const res = await fetch('icerik?tab=takvim', { method: 'POST', body: fd });
-        const data = await res.json();
+        const data = await MISTIK.istek('icerik', fd, {tab: 'takvim'});
         if (data.success) { alert('✅ ' + data.message); location.reload(); } 
         else { alert('❌ ' + data.message); }
     } catch (e) { alert('Sunucu veya Parse hatası! HTML yapısı değişmiş olabilir.'); } 
@@ -330,11 +432,4 @@ async function syncTakvim() {
 <?php 
 $page_content = ob_get_clean();
 
-// 4. LAYOUT YOLU DÜZELTİLDİ
-$layout_path = $base_path . '/admin/layouts/master_layouts.php';
-if (file_exists($layout_path)) {
-    require_once $layout_path; 
-} else {
-    echo "HATA: Layout dosyası bulunamadı: " . $layout_path;
-}
-?>
+require_once __DIR__ . '/../layouts/master_layouts.php';

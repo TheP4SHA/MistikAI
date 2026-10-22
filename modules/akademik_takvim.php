@@ -1,19 +1,21 @@
 <?php
 // Akademik Takvim Modülü
-// Variables: $this (MistikEngine), $clean_input, $raw_input
+// Variables: $this (MistikEngine), $clean_input (lowercase, ASCII-folded), $raw_input
 
-$aranan = ""; 
+$aranan = "";
 $etiket = "Yaklaşan Akademik Takvim";
 
-if (strpos($clean_input, 'kayit') !== false || strpos($clean_input, 'kayıt') !== false) { 
-    $aranan = "Kayıt"; $etiket = "Ders Kayıt Tarihleri"; 
-} elseif (strpos($clean_input, 'ekle') !== false || strpos($clean_input, 'cikar') !== false || strpos($clean_input, 'sil') !== false) { 
-    $aranan = "Ekleme-Çıkarma"; $etiket = "Ders Ekleme/Çıkarma Tarihleri"; 
-} elseif (strpos($clean_input, 'final') !== false || strpos($clean_input, 'yariyil sonu') !== false || strpos($clean_input, 'yarıyıl sonu') !== false) { 
-    $aranan = "Yarıyıl Sonu Sınavları"; $etiket = "Final Sınav Tarihleri"; 
-} elseif (strpos($clean_input, 'butunleme') !== false || strpos($clean_input, 'but') !== false || strpos($clean_input, 'bütünleme') !== false) { 
-    $aranan = "Bütünleme"; $etiket = "Bütünleme Sınav Tarihleri"; 
-} elseif (strpos($clean_input, 'vize') !== false || strpos($clean_input, 'ara sinav') !== false || strpos($clean_input, 'ara sınav') !== false) {
+// $clean_input küçük harfli, noktalamasız ve ASCII katlanmıştır ("Bütünleme" → "butunleme").
+// Kelime başına bakılır: "but" artık "bütün" kelimesini yakalamaz.
+if (preg_match('/\b(kayit|kayitlar)/', $clean_input)) {
+    $aranan = "Kayıt"; $etiket = "Ders Kayıt Tarihleri";
+} elseif (preg_match('/\b(ekle|ekleme|cikar|cikarma|ders sil)/', $clean_input)) {
+    $aranan = "Ekleme-Çıkarma"; $etiket = "Ders Ekleme/Çıkarma Tarihleri";
+} elseif (preg_match('/\b(final|yariyil sonu|donem sonu)/', $clean_input)) {
+    $aranan = "Yarıyıl Sonu Sınavları"; $etiket = "Final Sınav Tarihleri";
+} elseif (preg_match('/\bbutunleme|\bbut\b/', $clean_input)) {
+    $aranan = "Bütünleme"; $etiket = "Bütünleme Sınav Tarihleri";
+} elseif (preg_match('/\b(vize|ara sinav)/', $clean_input)) {
     $aranan = "Ara Sınav"; $etiket = "Vize (Ara Sınav) Tarihleri";
 }
 
@@ -29,16 +31,17 @@ if ($aranan !== "") {
 }
 
 if (empty($takvim)) {
-    return $this->response("Sorduğunuz konuyla ilgili akademik takvimde aktif bir kayıt bulunamadı.");
+    return $this->response("Sorduğunuz konuyla ilgili akademik takvimde aktif bir kayıt bulunamadı. Güncel bilgi için Öğrenci İşleri'ne danışabilirsiniz.");
 }
 
 $cevap = "📅 <b>{$etiket}</b><br><br>";
 foreach ($takvim as $t) {
-    $bas = date('d.m.Y', strtotime($t['baslangic_tarihi'])); 
-    $bit = date('d.m.Y', strtotime($t['bitis_tarihi']));
+    $bas = date('d.m.Y', strtotime($t['baslangic_tarihi']));
+    $bit = $t['bitis_tarihi'] ? date('d.m.Y', strtotime($t['bitis_tarihi'])) : $bas;
     $tarih_metni = ($bas == $bit) ? $bas : "{$bas} - {$bit}";
     $safe_faaliyet = htmlspecialchars((string)$t['faaliyet'], ENT_QUOTES, 'UTF-8');
-    $cevap .= "📌 <b>{$safe_faaliyet}</b><br>⏳ {$tarih_metni} ({$t['yariyil']} Yarıyılı)<br>────────────────<br>";
+    $safe_yariyil = htmlspecialchars((string)$t['yariyil'], ENT_QUOTES, 'UTF-8');
+    $cevap .= "📌 <b>{$safe_faaliyet}</b><br>⏳ {$tarih_metni} ({$safe_yariyil} Yarıyılı)<br>────────────────<br>";
 }
 
 return $this->response($cevap);

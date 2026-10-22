@@ -1,181 +1,232 @@
 <?php
-// /data/admin/front/akis.php
+// admin/pages/akis.php - Diyalog akışı (flow builder)
+// Buton aksiyon tipleri şemadaki enum ile birebir aynıdır: alt_menu | modul | link.
+//   alt_menu → hedef_veri: var olan bir menü kodu   (motor: flow_<kod>)
+//   modul    → hedef_veri: bot_moduller.modul_kodu  (motor: modul_<kod>)
+//   link     → hedef_veri: http(s) URL
+require_once __DIR__ . '/../_baslat.php';
 
-// GÜVENLİK DUVARI
-if (session_status() === PHP_SESSION_NONE) { session_start(); }
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: /OmyoWeb/MistikAI/admin/login");
-    exit;
+const AKSIYON_TIPLERI = ['alt_menu' => 'Alt Menü Aç', 'modul' => 'Modül Tetikle', 'link' => 'Bağlantı (URL) Aç'];
+
+/** Menü kodu: küçük harf, a-z 0-9 _ (2-50); uymuyorsa null. */
+function menuKoduAl(string $ham): ?string {
+    $kod = strtolower(trim(preg_replace('/[^a-zA-Z0-9_]/', '_', trim($ham))));
+    return preg_match('/^[a-z0-9_]{2,50}$/', $kod) ? $kod : null;
 }
 
-// 1. VERİTABANI BAĞLANTISI
-$doc_root = $_SERVER['DOCUMENT_ROOT']; 
-$base_path = $doc_root . '/OmyoWeb/MistikAI/data';
-$db_path = $base_path . '/config/db.php';
+/** Buton formunu doğrular; hata varsa JSON hata yanıtıyla biter. Dönüş: [metin, tip, hedef, sıra]. */
+function butonAlanlari(PDO $db): array {
+    $metin = trim((string)($_POST['buton_metni'] ?? ''));
+    $tip = (string)($_POST['aksiyon_tipi'] ?? '');
+    $hedef = trim((string)($_POST['hedef_veri'] ?? ''));
+    $sira = max(0, min(1000, (int)($_POST['siralama'] ?? 0)));
 
-if (file_exists($db_path)) { require_once $db_path; } 
-else { die("Kritik Hata: Veritabanı bağlantısı kurulamadı."); }
-global $db;
+    if ($metin === '' || mb_strlen($metin, 'UTF-8') > 100) {
+        Panel::json(['success' => false, 'message' => 'Buton metni 1-100 karakter olmalı.']);
+    }
+    if (!isset(AKSIYON_TIPLERI[$tip])) {
+        Panel::json(['success' => false, 'message' => 'Geçersiz aksiyon tipi (alt_menu, modul ya da link olmalı).']);
+    }
+    if ($hedef === '' || mb_strlen($hedef, 'UTF-8') > 255) {
+        Panel::json(['success' => false, 'message' => 'Hedef alanı 1-255 karakter olmalı.']);
+    }
+    if ($tip === 'alt_menu') {
+        $q = $db->prepare("SELECT 1 FROM bot_akis_menuleri WHERE menu_kodu = ?");
+        $q->execute([$hedef]);
+        if (!$q->fetchColumn()) {
+            Panel::json(['success' => false, 'message' => 'Hedef menü bulunamadı. Önce "' . $hedef . '" menüsünü oluşturun.']);
+        }
+    } elseif ($tip === 'modul') {
+        $q = $db->prepare("SELECT 1 FROM bot_moduller WHERE modul_kodu = ?");
+        $q->execute([$hedef]);
+        if (!$q->fetchColumn()) {
+            Panel::json(['success' => false, 'message' => 'Hedef modül bulunamadı; listeden bir modül kodu seçin.']);
+        }
+    } else {
+        $sema = strtolower((string)parse_url($hedef, PHP_URL_SCHEME));
+        if (!filter_var($hedef, FILTER_VALIDATE_URL) || !in_array($sema, ['http', 'https'], true)) {
+            Panel::json(['success' => false, 'message' => 'Bağlantı http:// ya da https:// ile başlayan geçerli bir URL olmalı.']);
+        }
+    }
+    return [$metin, $tip, $hedef, $sira];
+}
 
 // ======================================================================
-// 2. AJAX İŞLEMLERİ (CRUD)
+// AJAX İŞLEMLERİ (CRUD)
 // ======================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    header('Content-Type: application/json; charset=utf-8');
-    
-    if ($_POST['action'] === 'menu_ekle') {
-        $kodu = strtolower(trim(preg_replace('/[^a-zA-Z0-9_]/', '_', $_POST['menu_kodu'])));
-        $mesaj = trim($_POST['mesaj']);
-        if(!empty($kodu) && !empty($mesaj)) {
-            try {
-                $check = $db->prepare("SELECT id FROM bot_akis_menuleri WHERE menu_kodu = ?");
-                $check->execute([$kodu]);
-                if($check->rowCount() > 0) { echo json_encode(['success'=>false, 'message'=>'Bu menü kodu zaten var!']); exit; }
+    $action = (string)$_POST['action'];
+
+    if ($action === 'menu_ekle' || $action === 'menu_duzenle') {
+        $id = (int)($_POST['menu_id'] ?? 0);
+        $kodu = menuKoduAl((string)($_POST['menu_kodu'] ?? ''));
+        $mesaj = trim((string)($_POST['mesaj'] ?? ''));
+        if ($kodu === null || $mesaj === '' || ($action === 'menu_duzenle' && $id <= 0)) {
+            Panel::json(['success' => false, 'message' => 'Menü kodu (a-z, 0-9, _ / 2-50 karakter) ve mesaj zorunludur.']);
+        }
+        try {
+            $check = $db->prepare("SELECT id FROM bot_akis_menuleri WHERE menu_kodu = ? AND id <> ?");
+            $check->execute([$kodu, $id]);
+            if ($check->fetch()) {
+                Panel::json(['success' => false, 'message' => 'Bu menü kodu zaten kullanılıyor!']);
+            }
+            if ($action === 'menu_ekle') {
                 $db->prepare("INSERT INTO bot_akis_menuleri (menu_kodu, mesaj) VALUES (?, ?)")->execute([$kodu, $mesaj]);
-                echo json_encode(['success'=>true, 'message'=>'Yeni diyalog düğümü oluşturuldu!']);
-            } catch(Exception $e) { echo json_encode(['success'=>false, 'message'=>$e->getMessage()]); }
-        } else { echo json_encode(['success'=>false, 'message'=>'Boş alan bırakılamaz.']); }
-        exit;
+                Panel::kuralOnbelleginiTemizle();
+                Panel::json(['success' => true, 'message' => 'Yeni diyalog düğümü oluşturuldu!']);
+            }
+            $eski = $db->prepare("SELECT menu_kodu FROM bot_akis_menuleri WHERE id = ?");
+            $eski->execute([$id]);
+            $eski_kod = $eski->fetchColumn();
+            if ($eski_kod === false) {
+                Panel::json(['success' => false, 'message' => 'Menü bulunamadı.']);
+            }
+            // Kod değişirse bu menüyü hedefleyen alt_menu butonları da yeni koda taşınır.
+            $db->beginTransaction();
+            $db->prepare("UPDATE bot_akis_menuleri SET menu_kodu = ?, mesaj = ? WHERE id = ?")->execute([$kodu, $mesaj, $id]);
+            if ($eski_kod !== $kodu) {
+                $db->prepare("UPDATE bot_akis_butonlari SET hedef_veri = ? WHERE aksiyon_tipi = 'alt_menu' AND hedef_veri = ?")->execute([$kodu, $eski_kod]);
+            }
+            $db->commit();
+            Panel::kuralOnbelleginiTemizle();
+            Panel::json(['success' => true, 'message' => 'Menü başarıyla güncellendi!']);
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) { $db->rollBack(); }
+            Panel::json(['success' => false, 'message' => Panel::hata($e, 'akış menüsü kaydı')]);
+        }
     }
 
-    if ($_POST['action'] === 'menu_duzenle') {
-        $id = (int)$_POST['menu_id'];
-        $kodu = strtolower(trim(preg_replace('/[^a-zA-Z0-9_]/', '_', $_POST['menu_kodu'])));
-        $mesaj = trim($_POST['mesaj']);
-        if(!empty($kodu) && !empty($mesaj) && $id > 0) {
-            try {
-                $check = $db->prepare("SELECT id FROM bot_akis_menuleri WHERE menu_kodu = ? AND id != ?");
-                $check->execute([$kodu, $id]);
-                if($check->rowCount() > 0) { echo json_encode(['success'=>false, 'message'=>'Bu menü kodu başka bir menü tarafından kullanılıyor!']); exit; }
-                $db->prepare("UPDATE bot_akis_menuleri SET menu_kodu=?, mesaj=? WHERE id=?")->execute([$kodu, $mesaj, $id]);
-                echo json_encode(['success'=>true, 'message'=>'Menü başarıyla güncellendi!']);
-            } catch(Exception $e) { echo json_encode(['success'=>false, 'message'=>$e->getMessage()]); }
-        } else { echo json_encode(['success'=>false, 'message'=>'Eksik bilgi.']); }
-        exit;
-    }
-    
-    if ($_POST['action'] === 'menu_sil') {
-        try { $db->prepare("DELETE FROM bot_akis_menuleri WHERE id = ?")->execute([(int)$_POST['id']]); echo json_encode(['success'=>true]); } catch(Exception $e) { echo json_encode(['success'=>false]); }
-        exit;
+    if ($action === 'menu_sil') {
+        try {
+            $db->prepare("DELETE FROM bot_akis_menuleri WHERE id = ?")->execute([(int)($_POST['id'] ?? 0)]);
+            Panel::kuralOnbelleginiTemizle();
+            Panel::json(['success' => true]);
+        } catch (Throwable $e) {
+            Panel::json(['success' => false, 'message' => Panel::hata($e, 'akış menüsü silme')]);
+        }
     }
 
-    if ($_POST['action'] === 'buton_ekle') {
-        $ust_id = (int)$_POST['ust_menu_id'];
-        $metin = trim($_POST['buton_metni']);
-        $tip = $_POST['aksiyon_tipi'];
-        $hedef = trim($_POST['hedef_veri']);
-        $sira = (int)$_POST['siralama'];
-        if(!empty($metin) && !empty($hedef)) {
-            try {
-                $db->prepare("INSERT INTO bot_akis_butonlari (ust_menu_id, buton_metni, aksiyon_tipi, hedef_veri, siralama) VALUES (?, ?, ?, ?, ?)")->execute([$ust_id, $metin, $tip, $hedef, $sira]);
-                echo json_encode(['success'=>true, 'message'=>'Buton başarıyla eklendi!']);
-            } catch(Exception $e) { echo json_encode(['success'=>false, 'message'=>$e->getMessage()]); }
-        } else { echo json_encode(['success'=>false, 'message'=>'Metin ve Hedef alanları zorunludur.']); }
-        exit;
+    if ($action === 'buton_ekle') {
+        $ust_id = (int)($_POST['ust_menu_id'] ?? 0);
+        $q = $db->prepare("SELECT 1 FROM bot_akis_menuleri WHERE id = ?");
+        $q->execute([$ust_id]);
+        if (!$q->fetchColumn()) {
+            Panel::json(['success' => false, 'message' => 'Butonun ekleneceği menü bulunamadı.']);
+        }
+        [$metin, $tip, $hedef, $sira] = butonAlanlari($db);
+        try {
+            $db->prepare("INSERT INTO bot_akis_butonlari (ust_menu_id, buton_metni, aksiyon_tipi, hedef_veri, siralama) VALUES (?, ?, ?, ?, ?)")
+               ->execute([$ust_id, $metin, $tip, $hedef, $sira]);
+            Panel::kuralOnbelleginiTemizle();
+            Panel::json(['success' => true, 'message' => 'Buton başarıyla eklendi!']);
+        } catch (Throwable $e) {
+            Panel::json(['success' => false, 'message' => Panel::hata($e, 'akış butonu ekleme')]);
+        }
     }
 
-    if ($_POST['action'] === 'buton_duzenle') {
-        $id = (int)$_POST['buton_id'];
-        $metin = trim($_POST['buton_metni']);
-        $tip = $_POST['aksiyon_tipi'];
-        $hedef = trim($_POST['hedef_veri']);
-        $sira = (int)$_POST['siralama'];
-        if(!empty($metin) && !empty($hedef) && $id > 0) {
-            try {
-                $db->prepare("UPDATE bot_akis_butonlari SET buton_metni=?, aksiyon_tipi=?, hedef_veri=?, siralama=? WHERE id=?")->execute([$metin, $tip, $hedef, $sira, $id]);
-                echo json_encode(['success'=>true, 'message'=>'Buton başarıyla güncellendi!']);
-            } catch(Exception $e) { echo json_encode(['success'=>false, 'message'=>$e->getMessage()]); }
-        } else { echo json_encode(['success'=>false, 'message'=>'Metin ve Hedef alanları zorunludur.']); }
-        exit;
+    if ($action === 'buton_duzenle') {
+        $id = (int)($_POST['buton_id'] ?? 0);
+        [$metin, $tip, $hedef, $sira] = butonAlanlari($db);
+        try {
+            $upd = $db->prepare("UPDATE bot_akis_butonlari SET buton_metni = ?, aksiyon_tipi = ?, hedef_veri = ?, siralama = ? WHERE id = ?");
+            $upd->execute([$metin, $tip, $hedef, $sira, $id]);
+            Panel::kuralOnbelleginiTemizle();
+            Panel::json(['success' => true, 'message' => 'Buton başarıyla güncellendi!']);
+        } catch (Throwable $e) {
+            Panel::json(['success' => false, 'message' => Panel::hata($e, 'akış butonu düzenleme')]);
+        }
     }
 
-    if ($_POST['action'] === 'buton_sil') {
-        try { $db->prepare("DELETE FROM bot_akis_butonlari WHERE id = ?")->execute([(int)$_POST['id']]); echo json_encode(['success'=>true]); } catch(Exception $e) { echo json_encode(['success'=>false]); }
-        exit;
+    if ($action === 'buton_sil') {
+        try {
+            $db->prepare("DELETE FROM bot_akis_butonlari WHERE id = ?")->execute([(int)($_POST['id'] ?? 0)]);
+            Panel::kuralOnbelleginiTemizle();
+            Panel::json(['success' => true]);
+        } catch (Throwable $e) {
+            Panel::json(['success' => false, 'message' => Panel::hata($e, 'akış butonu silme')]);
+        }
     }
+
+    Panel::json(['success' => false, 'message' => 'Bilinmeyen işlem.'], 400);
 }
 
 // ======================================================================
-// 3. VERİ ÇEKİMİ VE ORG-CHART HARİTA MOTORUMUZ
+// VERİ ÇEKİMİ VE AĞAÇ
 // ======================================================================
 $menuler = $db->query("SELECT * FROM bot_akis_menuleri ORDER BY id ASC")->fetchAll(PDO::FETCH_ASSOC);
 $butonlar_raw = $db->query("SELECT * FROM bot_akis_butonlari ORDER BY siralama ASC, id ASC")->fetchAll(PDO::FETCH_ASSOC);
 $sistem_modulleri = $db->query("SELECT modul_kodu, modul_adi FROM bot_moduller ORDER BY modul_adi ASC")->fetchAll(PDO::FETCH_ASSOC);
 
 $butonlar = [];
-foreach($butonlar_raw as $b) { $butonlar[$b['ust_menu_id']][] = $b; }
+foreach ($butonlar_raw as $b) { $butonlar[$b['ust_menu_id']][] = $b; }
 
-// JSON Güvenli Hale Getirildi (Türkçe Karakter Uyumlu)
-$js_moduller = json_encode($sistem_modulleri, JSON_UNESCAPED_UNICODE);
-$js_menuler = json_encode(array_column($menuler, 'menu_kodu'), JSON_UNESCAPED_UNICODE);
+// <script> içine güvenle gömülecek JSON (</script> ve tırnaklar kaçışlı)
+$json_bayraklari = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE;
+$js_moduller = json_encode($sistem_modulleri, $json_bayraklari);
+$js_menuler = json_encode(array_column($menuler, 'menu_kodu'), $json_bayraklari);
 
-// KUSURSUZ DOM MİMARİSİ
-function drawNativeFlowTree($hedef_menu_kodu, $menuler, $butonlar, $ziyaret_edilenler = []) {
+/** data-* öznitelik dizisi üretir (değerler kaçışlanır). */
+function veriOznitelikleri(array $veri): string {
+    $cikti = '';
+    foreach ($veri as $ad => $deger) {
+        $cikti .= ' data-' . $ad . '="' . Guvenlik::e((string)$deger) . '"';
+    }
+    return $cikti;
+}
+
+/**
+ * Akış ağacını HTML olarak çizer. Satır içi JS yok: düğmeler data-islem ve data-* öznitelikleri taşır,
+ * tıklamalar sayfadaki tek bir addEventListener tarafından yakalanır.
+ */
+function drawNativeFlowTree(string $hedef_menu_kodu, array $menuler, array $butonlar, array $ziyaret_edilenler = []): string {
+    $e = [Guvenlik::class, 'e'];
     $aktif_menu = null;
-    foreach($menuler as $m) { if($m['menu_kodu'] === $hedef_menu_kodu) { $aktif_menu = $m; break; } }
-    
-    $html = "";
-    
-    if(!$aktif_menu) {
-        $safe_kod = htmlspecialchars($hedef_menu_kodu, ENT_QUOTES, 'UTF-8');
-        $html .= "<div class='n-box n-missing'><i class='fas fa-question-circle'></i> Eksik Menü:<br><b style='color:white;'>" . $safe_kod . "</b>";
-        $html .= "<div class='n-actions'><button onclick=\"openMenuModal('$safe_kod')\" title='Bu menüyü oluştur'><i class='fas fa-plus'></i> Hemen Oluştur</button></div></div>";
-        return $html;
-    }
+    foreach ($menuler as $m) { if ($m['menu_kodu'] === $hedef_menu_kodu) { $aktif_menu = $m; break; } }
 
-    if(in_array($hedef_menu_kodu, $ziyaret_edilenler)) {
-        $html .= "<div class='n-box n-loop'><i class='fas fa-undo'></i> Döngü/Başa Sarma:<br><b style='color:white;'>" . htmlspecialchars($hedef_menu_kodu) . "</b></div>";
-        return $html;
+    if (!$aktif_menu) {
+        return "<div class='n-box n-missing'><i class='fas fa-question-circle'></i> Eksik Menü:<br><b style='color:white;'>" . $e($hedef_menu_kodu) . "</b>"
+             . "<div class='n-actions'><button type='button'" . veriOznitelikleri(['islem' => 'menu-olustur', 'kod' => $hedef_menu_kodu]) . " title='Bu menüyü oluştur'><i class='fas fa-plus'></i> Hemen Oluştur</button></div></div>";
     }
-    
+    if (in_array($hedef_menu_kodu, $ziyaret_edilenler, true)) {
+        return "<div class='n-box n-loop'><i class='fas fa-undo'></i> Döngü/Başa Sarma:<br><b style='color:white;'>" . $e($hedef_menu_kodu) . "</b></div>";
+    }
     $ziyaret_edilenler[] = $hedef_menu_kodu;
-    $menu_id = $aktif_menu['id'];
+    $menu_id = (int)$aktif_menu['id'];
+    $ozet = mb_substr(strip_tags($aktif_menu['mesaj']), 0, 45, 'UTF-8') . (mb_strlen($aktif_menu['mesaj'], 'UTF-8') > 45 ? '...' : '');
 
-    $safe_m_kodu = htmlspecialchars($aktif_menu['menu_kodu'], ENT_QUOTES, 'UTF-8');
-    $safe_m_mesaj_js = htmlspecialchars($aktif_menu['mesaj'], ENT_QUOTES, 'UTF-8');
-    $safe_m_mesaj_disp = htmlspecialchars(mb_substr(strip_tags($aktif_menu['mesaj']), 0, 45)) . (mb_strlen($aktif_menu['mesaj']) > 45 ? "..." : "");
-
-    $html .= "<div class='n-box n-menu'>";
-    $html .= "  <div class='n-title'><i class='fas fa-code-branch'></i> " . $safe_m_kodu . "</div>";
-    $html .= "  <div class='n-desc'>\"" . $safe_m_mesaj_disp . "\"</div>";
+    $html  = "<div class='n-box n-menu'>";
+    $html .= "  <div class='n-title'><i class='fas fa-code-branch'></i> " . $e($aktif_menu['menu_kodu']) . "</div>";
+    $html .= "  <div class='n-desc'>\"" . $e($ozet) . "\"</div>";
     $html .= "  <div class='n-actions'>";
-    $html .= "    <button onclick=\"openEditMenuModal($menu_id, '$safe_m_kodu', '$safe_m_mesaj_js')\" title='Menüyü Düzenle'><i class='fas fa-edit'></i></button>";
-    $html .= "    <button onclick=\"openButonModal($menu_id, '$safe_m_kodu')\" title='Altına Buton Ekle' class='add-btn'><i class='fas fa-plus'></i></button>";
-    $html .= "    <button onclick=\"silMenu($menu_id)\" title='Menüyü Sil' class='del-btn'><i class='fas fa-trash'></i></button>";
+    $html .= "    <button type='button'" . veriOznitelikleri(['islem' => 'menu-duzenle', 'id' => $menu_id, 'kod' => $aktif_menu['menu_kodu'], 'mesaj' => $aktif_menu['mesaj']]) . " title='Menüyü Düzenle'><i class='fas fa-edit'></i></button>";
+    $html .= "    <button type='button'" . veriOznitelikleri(['islem' => 'buton-ekle', 'id' => $menu_id, 'kod' => $aktif_menu['menu_kodu']]) . " title='Altına Buton Ekle' class='add-btn'><i class='fas fa-plus'></i></button>";
+    $html .= "    <button type='button'" . veriOznitelikleri(['islem' => 'menu-sil', 'id' => $menu_id]) . " title='Menüyü Sil' class='del-btn'><i class='fas fa-trash'></i></button>";
     $html .= "  </div></div>";
 
     $btns = $butonlar[$menu_id] ?? [];
-    if(!empty($btns)) {
+    if ($btns) {
         $html .= "<ul>";
-        foreach($btns as $b) {
-            $html .= "<li>";
-            $b_id = $b['id'];
-            $safe_b_metin_js = htmlspecialchars($b['buton_metni'], ENT_QUOTES, 'UTF-8');
-            $safe_b_metin_disp = htmlspecialchars($b['buton_metni']);
-            $safe_b_tip = $b['aksiyon_tipi'];
-            $safe_b_hedef_js = htmlspecialchars($b['hedef_veri'], ENT_QUOTES, 'UTF-8');
-            $b_sira = $b['siralama'];
-
-            $html .= "  <div class='n-box n-btn'>";
-            $html .= "    <div class='n-btn-text'><i class='far fa-hand-pointer'></i> " . $safe_b_metin_disp . "</div>";
-            $html .= "    <div class='n-btn-actions'>";
-            $html .= "      <button onclick=\"openEditButonModal($b_id, '$safe_b_metin_js', '$safe_b_tip', '$safe_b_hedef_js', $b_sira)\" title='Butonu Düzenle'><i class='fas fa-edit'></i></button>";
-            $html .= "      <button onclick=\"silButon($b_id)\" title='Butonu Sil'><i class='fas fa-trash'></i></button>";
-            $html .= "    </div></div>";
-            
+        foreach ($btns as $b) {
+            $html .= "<li><div class='n-box n-btn'>";
+            $html .= "  <div class='n-btn-text'><i class='far fa-hand-pointer'></i> " . $e($b['buton_metni']) . "</div>";
+            $html .= "  <div class='n-btn-actions'>";
+            $html .= "    <button type='button'" . veriOznitelikleri(['islem' => 'buton-duzenle', 'id' => $b['id'], 'metin' => $b['buton_metni'], 'tip' => $b['aksiyon_tipi'], 'hedef' => $b['hedef_veri'], 'sira' => $b['siralama']]) . " title='Butonu Düzenle'><i class='fas fa-edit'></i></button>";
+            $html .= "    <button type='button'" . veriOznitelikleri(['islem' => 'buton-sil', 'id' => $b['id']]) . " title='Butonu Sil'><i class='fas fa-trash'></i></button>";
+            $html .= "  </div></div>";
             $html .= "  <ul class='target-ul'><li>";
             if ($b['aksiyon_tipi'] === 'alt_menu') {
                 $html .= drawNativeFlowTree($b['hedef_veri'], $menuler, $butonlar, $ziyaret_edilenler);
-            } elseif ($b['aksiyon_tipi'] === 'modul_tetikle') {
-                $html .= "  <div class='n-box n-plugin'><div style='font-size:0.75rem; opacity:0.8; margin-bottom:5px;'>Tetikleyici Modül:</div><b><i class='fas fa-bolt'></i> " . htmlspecialchars($b['hedef_veri']) . "</b></div>";
+            } elseif ($b['aksiyon_tipi'] === 'modul') {
+                $html .= "<div class='n-box n-plugin'><div style='font-size:0.75rem; opacity:0.8; margin-bottom:5px;'>Tetikleyici Modül:</div><b><i class='fas fa-bolt'></i> " . $e($b['hedef_veri']) . "</b></div>";
+            } elseif ($b['aksiyon_tipi'] === 'link') {
+                $html .= "<div class='n-box n-url'><div style='font-size:0.75rem; opacity:0.8; margin-bottom:5px;'>Yönlendirilen URL:</div><b><i class='fas fa-link'></i> " . $e($b['hedef_veri']) . "</b></div>";
             } else {
-                $html .= "  <div class='n-box n-url'><div style='font-size:0.75rem; opacity:0.8; margin-bottom:5px;'>Yönlendirilen URL:</div><b><i class='fas fa-link'></i> " . htmlspecialchars($b['hedef_veri']) . "</b></div>";
+                $html .= "<div class='n-box n-missing'><i class='fas fa-exclamation-triangle'></i> Geçersiz aksiyon tipi<br><small>Butonu düzenleyip tip seçin.</small></div>";
             }
             $html .= "  </li></ul></li>";
         }
         $html .= "</ul>";
     }
-    
     return $html;
 }
 
@@ -286,135 +337,6 @@ ob_start();
 <?php
 $extra_css = ob_get_clean();
 
-// Verileri Javascript'e Aktar
-$extra_js = "<script>
-    const sysModules = " . $js_moduller . ";
-    const sysMenus = " . $js_menuler . ";
-
-    function switchTab(tabId) {
-        document.querySelectorAll('.view-tab').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.view-content').forEach(c => c.classList.remove('active'));
-        event.target.classList.add('active');
-        document.getElementById(tabId).classList.add('active');
-    }
-
-    // ==========================================
-    // MÜKEMMEL PAN & ZOOM MOTORU (CACHE SİSTEMLİ)
-    // ==========================================
-    let scale = 1, panning = false, pointX = 0, pointY = 0, startX, startY;
-    let container, canvas;
-
-    document.addEventListener('DOMContentLoaded', () => {
-        container = document.getElementById('mapContainer');
-        canvas = document.getElementById('treeCanvas');
-        if(!container || !canvas) return;
-
-        // KAYDEDİLMİŞ POZİSYONU GERİ YÜKLE
-        let savedState = localStorage.getItem('mistik_flow_state');
-        if(savedState) {
-            let state = JSON.parse(savedState);
-            scale = state.scale;
-            pointX = state.x;
-            pointY = state.y;
-            setTransform();
-        } else {
-            setTimeout(fitScreen, 200);
-        }
-
-        container.addEventListener('mousedown', (e) => {
-            if(e.button !== 0) return; 
-            e.preventDefault();
-            panning = true;
-            container.style.cursor = 'grabbing';
-            startX = e.clientX - pointX;
-            startY = e.clientY - pointY;
-        });
-
-        window.addEventListener('mouseup', () => { 
-            panning = false; 
-            if(container) container.style.cursor = 'grab'; 
-            saveState(); 
-        });
-        
-        window.addEventListener('mousemove', (e) => {
-            if(!panning) return;
-            e.preventDefault();
-            pointX = e.clientX - startX;
-            pointY = e.clientY - startY;
-            setTransform();
-        });
-
-        container.addEventListener('wheel', (e) => {
-            if (e.ctrlKey) {
-                e.preventDefault();
-                let rect = container.getBoundingClientRect();
-                let mouseX = e.clientX - rect.left;
-                let mouseY = e.clientY - rect.top;
-
-                let wheel = e.deltaY < 0 ? 1 : -1;
-                let zoomFactor = Math.exp(wheel * 0.15); 
-                let newScale = scale * zoomFactor;
-                
-                newScale = Math.max(0.15, Math.min(newScale, 2.5));
-
-                pointX = mouseX - (mouseX - pointX) * (newScale / scale);
-                pointY = mouseY - (mouseY - pointY) * (newScale / scale);
-                
-                scale = newScale;
-                setTransform();
-                saveState(); 
-            } else {
-                e.preventDefault();
-                pointY -= e.deltaY;
-                pointX -= e.deltaX;
-                setTransform();
-                saveState(); 
-            }
-        }, { passive: false });
-    });
-
-    function setTransform() {
-        canvas.style.transform = `translate(\${pointX}px, \${pointY}px) scale(\${scale})`;
-    }
-
-    function saveState() {
-        let state = { x: pointX, y: pointY, scale: scale };
-        localStorage.setItem('mistik_flow_state', JSON.stringify(state));
-    }
-
-    function zoomIn() { scale = Math.min(scale * 1.2, 2.5); centerAdjust(); setTransform(); saveState(); }
-    function zoomOut() { scale = Math.max(scale / 1.2, 0.15); centerAdjust(); setTransform(); saveState(); }
-    
-    function centerAdjust() {
-        let cw = container.clientWidth / 2;
-        let ch = container.clientHeight / 2;
-        pointX = cw - (cw - pointX) * (scale / (scale*0.8));
-    }
-
-    function fitScreen() {
-        if(!container || !canvas) return;
-        let cw = container.clientWidth;
-        let ch = container.clientHeight;
-        
-        canvas.style.transform = 'translate(0px, 0px) scale(1)';
-        let tw = canvas.scrollWidth;
-        let th = canvas.scrollHeight;
-
-        let scaleX = (cw * 0.9) / tw;
-        let scaleY = (ch * 0.9) / th;
-        scale = Math.min(scaleX, scaleY);
-        
-        if(scale > 1) scale = 1; 
-        if(scale < 0.15) scale = 0.15;
-
-        pointX = (cw - (tw * scale)) / 2;
-        pointY = 40; 
-
-        setTransform();
-        saveState(); 
-    }
-</script>";
-
 ob_start(); 
 ?>
 
@@ -423,23 +345,21 @@ ob_start();
         <h1>Diyalog Akışı <span style="color: var(--text-muted); font-weight:400; font-size: 1.2rem;">/ Canvas Studio</span></h1>
         <p style="color: var(--text-muted); margin-top: 5px;">Ağacı haritada sürükleyin veya <b>Ctrl + Scroll</b> ile yakınlaşıp uzaklaşın.</p>
     </div>
-    <button onclick="openMenuModal()" class="btn-primary" style="padding: 0.8rem 1.5rem;"><i class="fas fa-project-diagram"></i> Yeni Menü Ekle</button>
+    <button type="button" data-islem="menu-olustur" data-kod="" class="btn-primary" style="padding: 0.8rem 1.5rem;"><i class="fas fa-project-diagram"></i> Yeni Menü Ekle</button>
 </div>
 
 <div class="view-tabs">
-    <button class="view-tab active" onclick="switchTab('mapView')"><i class="fas fa-sitemap"></i> Canvas Stüdyo</button>
-    <button class="view-tab" onclick="switchTab('listView')"><i class="fas fa-list"></i> Klasik Liste</button>
+    <button type="button" class="view-tab active" data-sekme="mapView"><i class="fas fa-sitemap"></i> Canvas Stüdyo</button>
+    <button type="button" class="view-tab" data-sekme="listView"><i class="fas fa-list"></i> Klasik Liste</button>
 </div>
 
 <div id="mapView" class="view-content active">
-    
     <div id="mapContainer">
         <div class="zoom-controls">
-            <button class="zoom-btn" onclick="zoomIn()" title="Yaklaş">+</button>
-            <button class="zoom-btn" onclick="fitScreen()" title="Ekrana Sığdır" style="font-size:1rem;"><i class="fas fa-expand"></i></button>
-            <button class="zoom-btn" onclick="zoomOut()" title="Uzaklaş">-</button>
+            <button type="button" class="zoom-btn" data-zoom="in" title="Yaklaş">+</button>
+            <button type="button" class="zoom-btn" data-zoom="fit" title="Ekrana Sığdır" style="font-size:1rem;"><i class="fas fa-expand"></i></button>
+            <button type="button" class="zoom-btn" data-zoom="out" title="Uzaklaş">-</button>
         </div>
-
         <div id="treeCanvas">
             <div class="tree">
                 <ul><li><?php echo drawNativeFlowTree('ana_menu', $menuler, $butonlar); ?></li></ul>
@@ -456,23 +376,23 @@ ob_start();
         <?php foreach($menuler as $m): $menu_butonlari = $butonlar[$m['id']] ?? []; ?>
         <div style="width:100%; display:block; padding:20px; border-radius:12px; margin-bottom:1rem; border:1px solid rgba(255,255,255,0.1); background:var(--bg-panel); text-align:left;">
             <div style="display:flex; justify-content:space-between; margin-bottom:15px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:15px;">
-                <div><b style="color:var(--accent-color); font-size:1.2rem;"><i class="fas fa-code-branch"></i> <?php echo htmlspecialchars($m['menu_kodu']); ?></b> <br> <span style="color:#94a3b8; font-style:italic; display:block; margin-top:5px;">"<?php echo htmlspecialchars($m['mesaj']); ?>"</span></div>
+                <div><b style="color:var(--accent-color); font-size:1.2rem;"><i class="fas fa-code-branch"></i> <?php echo Guvenlik::e($m['menu_kodu']); ?></b> <br> <span style="color:#94a3b8; font-style:italic; display:block; margin-top:5px;">"<?php echo Guvenlik::e($m['mesaj']); ?>"</span></div>
                 <div>
-                    <button onclick="openEditMenuModal(<?php echo $m['id']; ?>, '<?php echo htmlspecialchars($m['menu_kodu'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($m['mesaj'], ENT_QUOTES); ?>')" style="background:rgba(245, 158, 11, 0.1); border:1px solid var(--warning-color); padding:8px 12px; border-radius:6px; color:var(--warning-color); cursor:pointer;"><i class="fas fa-edit"></i> Düzenle</button>
-                    <button onclick="silMenu(<?php echo $m['id']; ?>)" style="background:rgba(239, 68, 68, 0.1); border:1px solid var(--danger-color); padding:8px 12px; border-radius:6px; color:var(--danger-color); cursor:pointer; margin-left:10px;"><i class="fas fa-trash"></i> Sil</button>
+                    <button type="button"<?php echo veriOznitelikleri(['islem' => 'menu-duzenle', 'id' => $m['id'], 'kod' => $m['menu_kodu'], 'mesaj' => $m['mesaj']]); ?> style="background:rgba(245, 158, 11, 0.1); border:1px solid var(--warning-color); padding:8px 12px; border-radius:6px; color:var(--warning-color); cursor:pointer;"><i class="fas fa-edit"></i> Düzenle</button>
+                    <button type="button"<?php echo veriOznitelikleri(['islem' => 'menu-sil', 'id' => $m['id']]); ?> style="background:rgba(239, 68, 68, 0.1); border:1px solid var(--danger-color); padding:8px 12px; border-radius:6px; color:var(--danger-color); cursor:pointer; margin-left:10px;"><i class="fas fa-trash"></i> Sil</button>
                 </div>
             </div>
             <div style="background:rgba(0,0,0,0.3); padding:15px; border-radius:10px;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:10px;"><b style="color:#cbd5e1;">Bağlı Butonlar</b> <button onclick="openButonModal(<?php echo $m['id']; ?>, '<?php echo htmlspecialchars($m['menu_kodu']); ?>')" style="background:var(--success-color); border:none; padding:5px 12px; border-radius:5px; color:#000; cursor:pointer; font-weight:bold;"><i class="fas fa-plus"></i> Ekle</button></div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:10px;"><b style="color:#cbd5e1;">Bağlı Butonlar</b> <button type="button"<?php echo veriOznitelikleri(['islem' => 'buton-ekle', 'id' => $m['id'], 'kod' => $m['menu_kodu']]); ?> style="background:var(--success-color); border:none; padding:5px 12px; border-radius:5px; color:#000; cursor:pointer; font-weight:bold;"><i class="fas fa-plus"></i> Ekle</button></div>
                 <?php foreach($menu_butonlari as $b): ?>
                     <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.05); padding:10px 15px; border-radius:8px; margin-bottom:8px;">
                         <div>
-                            <b style="color:white; font-size:1rem;"><i class="far fa-hand-pointer"></i> <?php echo htmlspecialchars($b['buton_metni']); ?></b> 
-                            <span style="color:#64748b; margin-left:10px; font-size:0.9rem;">&rarr; <?php echo htmlspecialchars($b['hedef_veri']); ?> <small>(<?php echo $b['aksiyon_tipi']; ?>)</small></span>
+                            <b style="color:white; font-size:1rem;"><i class="far fa-hand-pointer"></i> <?php echo Guvenlik::e($b['buton_metni']); ?></b> 
+                            <span style="color:#64748b; margin-left:10px; font-size:0.9rem;">&rarr; <?php echo Guvenlik::e($b['hedef_veri']); ?> <small>(<?php echo Guvenlik::e(AKSIYON_TIPLERI[$b['aksiyon_tipi']] ?? 'geçersiz tip'); ?>)</small></span>
                         </div>
                         <div>
-                            <button onclick="openEditButonModal(<?php echo $b['id']; ?>, '<?php echo htmlspecialchars($b['buton_metni'], ENT_QUOTES); ?>', '<?php echo $b['aksiyon_tipi']; ?>', '<?php echo htmlspecialchars($b['hedef_veri'], ENT_QUOTES); ?>', <?php echo $b['siralama']; ?>)" style="background:none; border:none; color:var(--warning-color); cursor:pointer; font-size:1.1rem; padding:0 8px;"><i class="fas fa-edit"></i></button>
-                            <button onclick="silButon(<?php echo $b['id']; ?>)" style="background:none; border:none; color:var(--danger-color); cursor:pointer; font-size:1.1rem; padding:0 8px;"><i class="fas fa-trash"></i></button>
+                            <button type="button"<?php echo veriOznitelikleri(['islem' => 'buton-duzenle', 'id' => $b['id'], 'metin' => $b['buton_metni'], 'tip' => $b['aksiyon_tipi'], 'hedef' => $b['hedef_veri'], 'sira' => $b['siralama']]); ?> style="background:none; border:none; color:var(--warning-color); cursor:pointer; font-size:1.1rem; padding:0 8px;"><i class="fas fa-edit"></i></button>
+                            <button type="button"<?php echo veriOznitelikleri(['islem' => 'buton-sil', 'id' => $b['id']]); ?> style="background:none; border:none; color:var(--danger-color); cursor:pointer; font-size:1.1rem; padding:0 8px;"><i class="fas fa-trash"></i></button>
                         </div>
                     </div>
                 <?php endforeach; ?>
@@ -482,16 +402,23 @@ ob_start();
     </div>
 </div>
 
+<?php
+$tip_secenekleri = '';
+foreach (AKSIYON_TIPLERI as $deger => $etiket) {
+    $tip_secenekleri .= '<option value="' . Guvenlik::e($deger) . '">' . Guvenlik::e($etiket) . '</option>';
+}
+?>
 <div class="mistik-modal-overlay" id="menuModal">
     <div class="mistik-modal-box">
         <div style="display:flex; justify-content:space-between; margin-bottom:1.5rem;">
             <h3 style="color:var(--accent-color); margin:0;"><i class="fas fa-project-diagram"></i> Yeni Menü Oluştur</h3>
-            <button onclick="closeModal('menuModal')" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;"><i class="fas fa-times"></i></button>
+            <button type="button" data-kapat="menuModal" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;"><i class="fas fa-times"></i></button>
         </div>
-        <form id="menuForm" onsubmit="submitForm(event, 'menuForm')">
+        <form id="menuForm" class="js-akis-form">
+            <?php echo Guvenlik::csrfAlani(); ?>
             <input type="hidden" name="action" value="menu_ekle">
             <label>Menü Kodu (Benzersiz - Boşluksuz)</label>
-            <input type="text" name="menu_kodu" id="add_m_kodu" class="modern-input" required>
+            <input type="text" name="menu_kodu" id="add_m_kodu" class="modern-input" required maxlength="50">
             <label>Botun Söyleyeceği Mesaj</label>
             <textarea name="mesaj" class="modern-input" rows="3" required style="resize:vertical;"></textarea>
             <button type="submit" class="btn-primary" style="width:100%; padding:1rem; border-radius:0.5rem; justify-content:center;"><i class="fas fa-save"></i> Menüyü Kaydet</button>
@@ -504,13 +431,14 @@ ob_start();
     <div class="mistik-modal-box">
         <div style="display:flex; justify-content:space-between; margin-bottom:1.5rem;">
             <h3 style="color:var(--warning-color); margin:0;"><i class="fas fa-edit"></i> Menüyü Düzenle</h3>
-            <button onclick="closeModal('editMenuModal')" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;"><i class="fas fa-times"></i></button>
+            <button type="button" data-kapat="editMenuModal" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;"><i class="fas fa-times"></i></button>
         </div>
-        <form id="editMenuForm" onsubmit="submitForm(event, 'editMenuForm')">
+        <form id="editMenuForm" class="js-akis-form">
+            <?php echo Guvenlik::csrfAlani(); ?>
             <input type="hidden" name="action" value="menu_duzenle">
             <input type="hidden" name="menu_id" id="edit_m_id">
             <label>Menü Kodu</label>
-            <input type="text" name="menu_kodu" id="edit_m_kodu" class="modern-input" required>
+            <input type="text" name="menu_kodu" id="edit_m_kodu" class="modern-input" required maxlength="50">
             <label>Botun Söyleyeceği Mesaj</label>
             <textarea name="mesaj" id="edit_m_mesaj" class="modern-input" rows="3" required style="resize:vertical;"></textarea>
             <button type="submit" style="width:100%; padding:1rem; border-radius:0.5rem; justify-content:center; background:var(--warning-color); color:#000; font-weight:bold; border:none; cursor:pointer;"><i class="fas fa-check"></i> Güncelle</button>
@@ -523,32 +451,27 @@ ob_start();
     <div class="mistik-modal-box">
         <div style="display:flex; justify-content:space-between; margin-bottom:1.5rem;">
             <h3 style="color:var(--success-color); margin:0;"><i class="fas fa-plus"></i> Buton Ekle</h3>
-            <button onclick="closeModal('butonModal')" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;"><i class="fas fa-times"></i></button>
+            <button type="button" data-kapat="butonModal" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;"><i class="fas fa-times"></i></button>
         </div>
-        <form id="butonForm" onsubmit="submitForm(event, 'butonForm')">
+        <form id="butonForm" class="js-akis-form">
+            <?php echo Guvenlik::csrfAlani(); ?>
             <input type="hidden" name="action" value="buton_ekle">
             <input type="hidden" name="ust_menu_id" id="b_ust_id">
             <div style="margin-bottom:15px; font-size:1rem; color:var(--text-muted);">Ekleneceği Menü: <b id="b_menu_kodu" style="color:white;"></b></div>
             <label>Buton Metni</label>
-            <input type="text" name="buton_metni" class="modern-input" required>
+            <input type="text" name="buton_metni" class="modern-input" required maxlength="100">
             <div style="display:flex; gap:10px;">
                 <div style="flex:1;">
                     <label>Aksiyon Tipi</label>
-                    <select name="aksiyon_tipi" id="b_aksiyon" class="modern-input" onchange="runAutocomplete('b_hedef', 'b_aksiyon', 'b_ac_list')">
-                        <option value="alt_menu">Alt Menü Aç</option>
-                        <option value="modul_tetikle">Modül/Plugin Tetikle</option>
-                        <option value="url_git">URL'ye Git</option>
-                    </select>
+                    <select name="aksiyon_tipi" id="b_aksiyon" class="modern-input js-ac-tetik" data-hedef="b_hedef" data-liste="b_ac_list"><?php echo $tip_secenekleri; ?></select>
                 </div>
-                <div style="width:80px;"><label>Sıra</label><input type="number" name="siralama" value="1" class="modern-input" style="text-align:center;"></div>
+                <div style="width:80px;"><label>Sıra</label><input type="number" name="siralama" value="1" min="0" max="1000" class="modern-input" style="text-align:center;"></div>
             </div>
-            
-            <label>Hedef / Komut (Yazmaya Başlayın)</label>
+            <label>Hedef (Yazmaya Başlayın)</label>
             <div class="autocomplete-wrapper">
-                <input type="text" name="hedef_veri" id="b_hedef" class="modern-input" required autocomplete="off" oninput="runAutocomplete('b_hedef', 'b_aksiyon', 'b_ac_list')" onfocus="runAutocomplete('b_hedef', 'b_aksiyon', 'b_ac_list')">
+                <input type="text" name="hedef_veri" id="b_hedef" class="modern-input js-ac-tetik" data-hedef="b_hedef" data-liste="b_ac_list" data-tip="b_aksiyon" required maxlength="255" autocomplete="off">
                 <div id="b_ac_list" class="autocomplete-list"></div>
             </div>
-            
             <button type="submit" style="width:100%; padding:1rem; border-radius:0.5rem; justify-content:center; background:var(--success-color); color:#000; font-weight:bold; border:none; cursor:pointer; margin-top:10px;"><i class="fas fa-check"></i> Ekle</button>
             <div id="butonFormMsg" style="margin-top: 1rem; text-align: center; font-size: 0.9rem;"></div>
         </form>
@@ -559,165 +482,229 @@ ob_start();
     <div class="mistik-modal-box">
         <div style="display:flex; justify-content:space-between; margin-bottom:1.5rem;">
             <h3 style="color:var(--warning-color); margin:0;"><i class="fas fa-edit"></i> Butonu Düzenle</h3>
-            <button onclick="closeModal('editButonModal')" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;"><i class="fas fa-times"></i></button>
+            <button type="button" data-kapat="editButonModal" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;"><i class="fas fa-times"></i></button>
         </div>
-        <form id="editButonForm" onsubmit="submitForm(event, 'editButonForm')">
+        <form id="editButonForm" class="js-akis-form">
+            <?php echo Guvenlik::csrfAlani(); ?>
             <input type="hidden" name="action" value="buton_duzenle">
             <input type="hidden" name="buton_id" id="edit_b_id">
             <label>Buton Metni</label>
-            <input type="text" name="buton_metni" id="edit_b_metin" class="modern-input" required>
+            <input type="text" name="buton_metni" id="edit_b_metin" class="modern-input" required maxlength="100">
             <div style="display:flex; gap:10px;">
                 <div style="flex:1;">
                     <label>Aksiyon Tipi</label>
-                    <select name="aksiyon_tipi" id="edit_b_aksiyon" class="modern-input" onchange="runAutocomplete('edit_b_hedef', 'edit_b_aksiyon', 'edit_b_ac_list')">
-                        <option value="alt_menu">Alt Menü Aç</option>
-                        <option value="modul_tetikle">Modül/Plugin Tetikle</option>
-                        <option value="url_git">URL'ye Git</option>
-                    </select>
+                    <select name="aksiyon_tipi" id="edit_b_aksiyon" class="modern-input js-ac-tetik" data-hedef="edit_b_hedef" data-liste="edit_b_ac_list"><?php echo $tip_secenekleri; ?></select>
                 </div>
-                <div style="width:80px;"><label>Sıra</label><input type="number" name="siralama" id="edit_b_sira" class="modern-input" style="text-align:center;"></div>
+                <div style="width:80px;"><label>Sıra</label><input type="number" name="siralama" id="edit_b_sira" min="0" max="1000" class="modern-input" style="text-align:center;"></div>
             </div>
-            
-            <label>Hedef / Komut (Yazmaya Başlayın)</label>
+            <label>Hedef (Yazmaya Başlayın)</label>
             <div class="autocomplete-wrapper">
-                <input type="text" name="hedef_veri" id="edit_b_hedef" class="modern-input" required autocomplete="off" oninput="runAutocomplete('edit_b_hedef', 'edit_b_aksiyon', 'edit_b_ac_list')" onfocus="runAutocomplete('edit_b_hedef', 'edit_b_aksiyon', 'edit_b_ac_list')">
+                <input type="text" name="hedef_veri" id="edit_b_hedef" class="modern-input js-ac-tetik" data-hedef="edit_b_hedef" data-liste="edit_b_ac_list" data-tip="edit_b_aksiyon" required maxlength="255" autocomplete="off">
                 <div id="edit_b_ac_list" class="autocomplete-list"></div>
             </div>
-            
             <button type="submit" style="width:100%; padding:1rem; border-radius:0.5rem; justify-content:center; background:var(--warning-color); color:#000; font-weight:bold; border:none; cursor:pointer; margin-top:10px;"><i class="fas fa-check"></i> Güncelle</button>
             <div id="editButonFormMsg" style="margin-top: 1rem; text-align: center; font-size: 0.9rem;"></div>
         </form>
     </div>
 </div>
 
+<?php 
+$page_content = ob_get_clean();
+
+ob_start();
+?>
 <script>
-    function openMenuModal(prefillKodu = '') { 
-        document.getElementById('menuForm').reset(); 
-        if(prefillKodu) document.getElementById('add_m_kodu').value = prefillKodu;
-        document.getElementById('menuModal').classList.add('active'); 
+(function () {
+    const sysModules = <?php echo $js_moduller; ?>;
+    const sysMenus = <?php echo $js_menuler; ?>;
+    const $ = id => document.getElementById(id);
+    const ac = id => $(id).classList.add('active');
+
+    // ---------- Sekmeler ----------
+    document.querySelectorAll('.view-tab').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            document.querySelectorAll('.view-tab').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.view-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            $(btn.dataset.sekme).classList.add('active');
+        });
+    });
+
+    // ---------- Pan & zoom ----------
+    let scale = 1, panning = false, pointX = 0, pointY = 0, startX, startY;
+    const container = $('mapContainer'), canvas = $('treeCanvas');
+
+    function setTransform() { canvas.style.transform = `translate(${pointX}px, ${pointY}px) scale(${scale})`; }
+    function saveState() {
+        try { localStorage.setItem('mistik_flow_state', JSON.stringify({ x: pointX, y: pointY, scale: scale })); } catch (e) {}
     }
-    function openButonModal(menu_id, menu_kodu) { 
-        document.getElementById('butonForm').reset(); 
-        document.getElementById('b_ust_id').value = menu_id;
-        document.getElementById('b_menu_kodu').innerText = menu_kodu;
-        document.getElementById('butonModal').classList.add('active'); 
+    function centerAdjust() {
+        const cw = container.clientWidth / 2;
+        pointX = cw - (cw - pointX) * (scale / (scale * 0.8));
     }
-    function openEditMenuModal(id, kodu, mesaj) {
-        document.getElementById('edit_m_id').value = id;
-        document.getElementById('edit_m_kodu').value = kodu;
-        document.getElementById('edit_m_mesaj').value = mesaj;
-        document.getElementById('editMenuModal').classList.add('active');
+    function fitScreen() {
+        const cw = container.clientWidth, ch = container.clientHeight;
+        canvas.style.transform = 'translate(0px, 0px) scale(1)';
+        const tw = canvas.scrollWidth, th = canvas.scrollHeight;
+        scale = Math.min((cw * 0.9) / tw, (ch * 0.9) / th);
+        scale = Math.max(0.15, Math.min(scale, 1));
+        pointX = (cw - (tw * scale)) / 2;
+        pointY = 40;
+        setTransform(); saveState();
     }
-    function openEditButonModal(id, metin, tip, hedef, sira) {
-        document.getElementById('edit_b_id').value = id;
-        document.getElementById('edit_b_metin').value = metin;
-        document.getElementById('edit_b_aksiyon').value = tip;
-        document.getElementById('edit_b_hedef').value = hedef;
-        document.getElementById('edit_b_sira').value = sira;
-        document.getElementById('editButonModal').classList.add('active');
+    document.querySelectorAll('[data-zoom]').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            const z = btn.dataset.zoom;
+            if (z === 'fit') { fitScreen(); return; }
+            scale = z === 'in' ? Math.min(scale * 1.2, 2.5) : Math.max(scale / 1.2, 0.15);
+            centerAdjust(); setTransform(); saveState();
+        });
+    });
+
+    let kayitli = null;
+    try { kayitli = JSON.parse(localStorage.getItem('mistik_flow_state') || 'null'); } catch (e) {}
+    if (kayitli && typeof kayitli.scale === 'number') {
+        scale = kayitli.scale; pointX = +kayitli.x || 0; pointY = +kayitli.y || 0; setTransform();
+    } else {
+        setTimeout(fitScreen, 200);
     }
-    function closeModal(id) { document.getElementById(id).classList.remove('active'); }
-
-    // --- KUSURSUZ (NULL-SAFE) CANLI ARAMA MOTORU ---
-    function runAutocomplete(inputId, actionId, listId) {
-        const input = document.getElementById(inputId);
-        const action = document.getElementById(actionId).value;
-        const listContainer = document.getElementById(listId);
-        
-        let val = (input.value || '').toLowerCase().trim();
-        listContainer.innerHTML = '';
-        
-        if(action === 'url_git') { listContainer.style.display = 'none'; return; }
-
-        let matches = [];
-        if(action === 'modul_tetikle') {
-            // Null veriler çökmeye neden olmasın diye güvenli atama yapıldı
-            matches = sysModules.filter(m => {
-                let kod = (m.modul_kodu || '').toLowerCase();
-                let adi = (m.modul_adi || '').toLowerCase();
-                return kod.includes(val) || adi.includes(val);
-            });
-            
-            // Başlık ve Sayaç Eklendi
-            if(matches.length > 0) {
-                let header = document.createElement('div');
-                header.innerHTML = `<small style='color:#10b981; font-weight:bold;'>Sistemdeki Modüller (${matches.length} adet)</small>`;
-                header.style.background = '#0f172a';
-                header.style.cursor = 'default';
-                header.style.borderBottom = '1px solid rgba(255,255,255,0.1)';
-                listContainer.appendChild(header);
-            }
-
-            matches.forEach(m => {
-                let div = document.createElement('div');
-                div.innerHTML = `<i class='fas fa-bolt' style='color:#f59e0b;'></i> <b>${m.modul_adi || 'İsimsiz Modül'}</b> <small style="color:#64748b;">(${m.modul_kodu || 'kodu-yok'})</small>`;
-                div.onclick = function() { input.value = m.modul_kodu; listContainer.style.display = 'none'; };
-                listContainer.appendChild(div);
-            });
-
-        } else if(action === 'alt_menu') {
-            matches = sysMenus.filter(m => (m || '').toLowerCase().includes(val));
-            
-            if(matches.length > 0) {
-                let header = document.createElement('div');
-                header.innerHTML = `<small style='color:#10b981; font-weight:bold;'>Mevcut Alt Menüler (${matches.length} adet)</small>`;
-                header.style.background = '#0f172a';
-                header.style.cursor = 'default';
-                header.style.borderBottom = '1px solid rgba(255,255,255,0.1)';
-                listContainer.appendChild(header);
-            }
-
-            matches.forEach(m => {
-                let div = document.createElement('div');
-                div.innerHTML = `<i class='fas fa-code-branch' style='color:#10b981;'></i> <b>${m}</b>`;
-                div.onclick = function() { input.value = m; listContainer.style.display = 'none'; };
-                listContainer.appendChild(div);
-            });
+    container.addEventListener('mousedown', (e) => {
+        if (e.button !== 0 || e.target.closest('button')) return;
+        e.preventDefault();
+        panning = true; container.style.cursor = 'grabbing';
+        startX = e.clientX - pointX; startY = e.clientY - pointY;
+    });
+    window.addEventListener('mouseup', () => { if (!panning) return; panning = false; container.style.cursor = 'grab'; saveState(); });
+    window.addEventListener('mousemove', (e) => {
+        if (!panning) return;
+        e.preventDefault();
+        pointX = e.clientX - startX; pointY = e.clientY - startY; setTransform();
+    });
+    container.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        if (e.ctrlKey) {
+            const rect = container.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left, mouseY = e.clientY - rect.top;
+            const newScale = Math.max(0.15, Math.min(scale * Math.exp((e.deltaY < 0 ? 1 : -1) * 0.15), 2.5));
+            pointX = mouseX - (mouseX - pointX) * (newScale / scale);
+            pointY = mouseY - (mouseY - pointY) * (newScale / scale);
+            scale = newScale;
+        } else {
+            pointY -= e.deltaY; pointX -= e.deltaX;
         }
+        setTransform(); saveState();
+    }, { passive: false });
 
-        if(matches.length > 0) listContainer.style.display = 'block';
-        else listContainer.style.display = 'none';
-    }
+    // ---------- Modallar: tüm düğmeler data-islem ile, değerler data-* özniteliklerinden ----------
+    function formuSifirla(id) { $(id).reset(); $(id + 'Msg').textContent = ''; }
 
-    document.addEventListener("click", function (e) {
-        if(e.target.id !== "b_hedef" && e.target.id !== "edit_b_hedef") {
-            document.getElementById('b_ac_list').style.display = 'none';
-            document.getElementById('edit_b_ac_list').style.display = 'none';
+    document.addEventListener('click', async function (e) {
+        if (e.target.classList.contains('mistik-modal-overlay')) { e.target.classList.remove('active'); return; }
+        const kapat = e.target.closest('[data-kapat]');
+        if (kapat) { $(kapat.dataset.kapat).classList.remove('active'); return; }
+
+        const el = e.target.closest('[data-islem]');
+        if (!el) {
+            if (!e.target.classList.contains('js-ac-tetik')) {
+                $('b_ac_list').style.display = 'none'; $('edit_b_ac_list').style.display = 'none';
+            }
+            return;
+        }
+        const d = el.dataset;
+        switch (d.islem) {
+            case 'menu-olustur':
+                formuSifirla('menuForm');
+                $('add_m_kodu').value = d.kod || '';
+                ac('menuModal');
+                break;
+            case 'menu-duzenle':
+                formuSifirla('editMenuForm');
+                $('edit_m_id').value = d.id; $('edit_m_kodu').value = d.kod; $('edit_m_mesaj').value = d.mesaj;
+                ac('editMenuModal');
+                break;
+            case 'buton-ekle':
+                formuSifirla('butonForm');
+                $('b_ust_id').value = d.id; $('b_menu_kodu').textContent = d.kod;
+                ac('butonModal');
+                break;
+            case 'buton-duzenle':
+                formuSifirla('editButonForm');
+                $('edit_b_id').value = d.id; $('edit_b_metin').value = d.metin;
+                $('edit_b_aksiyon').value = d.tip; $('edit_b_hedef').value = d.hedef; $('edit_b_sira').value = d.sira;
+                ac('editButonModal');
+                break;
+            case 'menu-sil':
+            case 'buton-sil': {
+                const menu = d.islem === 'menu-sil';
+                if (!confirm(menu ? 'DİKKAT: Menü silinirse içindeki tüm butonlar da silinir. Onaylıyor musunuz?' : 'Butonu silmek istediğinize emin misiniz?')) return;
+                const fd = new FormData(); fd.append('action', menu ? 'menu_sil' : 'buton_sil'); fd.append('id', d.id);
+                const data = await MISTIK.istek('akis', fd);
+                if (data.success) location.reload(); else alert(data.message);
+                break;
+            }
         }
     });
 
-    async function submitForm(e, formId) {
-        e.preventDefault(); 
-        const form = document.getElementById(formId);
-        const msg = document.getElementById(formId + 'Msg');
-        const btn = form.querySelector('button[type="submit"]');
-        const originalText = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> İşleniyor...'; btn.disabled = true;
-        try {
-            const res = await fetch('akis', { method: 'POST', body: new FormData(form) });
-            const data = await res.json();
-            if(data.success) { msg.innerHTML = `<span style="color: var(--success-color);"><i class="fas fa-check-circle"></i> ${data.message}</span>`; setTimeout(() => location.reload(), 800); } 
-            else { msg.innerHTML = `<span style="color: var(--danger-color);"><i class="fas fa-exclamation-triangle"></i> ${data.message}</span>`; btn.innerHTML = originalText; btn.disabled = false; }
-        } catch (err) { msg.innerHTML = 'Sunucu Hatası!'; btn.innerHTML = originalText; btn.disabled = false; }
+    // ---------- Hedef için otomatik tamamlama (DOM ile; isimler HTML olarak yorumlanmaz) ----------
+    function oneriSatiri(ikon, renk, baslik, ek, deger, input, liste) {
+        const div = document.createElement('div');
+        const i = document.createElement('i'); i.className = 'fas ' + ikon; i.style.color = renk;
+        const b = document.createElement('b'); b.textContent = baslik;
+        div.append(i, ' ', b);
+        if (ek) { const sm = document.createElement('small'); sm.style.color = '#64748b'; sm.textContent = ' (' + ek + ')'; div.appendChild(sm); }
+        div.addEventListener('click', function () { input.value = deger; liste.style.display = 'none'; });
+        return div;
     }
+    function listeBasligi(metin) {
+        const h = document.createElement('div');
+        const sm = document.createElement('small'); sm.style.color = '#10b981'; sm.style.fontWeight = 'bold'; sm.textContent = metin;
+        h.appendChild(sm); h.style.background = '#0f172a'; h.style.cursor = 'default'; h.style.borderBottom = '1px solid rgba(255,255,255,0.1)';
+        return h;
+    }
+    function runAutocomplete(inputId, actionId, listId) {
+        const input = $(inputId), tip = $(actionId).value, liste = $(listId);
+        const val = (input.value || '').toLowerCase().trim();
+        liste.textContent = '';
+        let sayi = 0;
+        if (tip === 'modul') {
+            const eslesen = sysModules.filter(m => (m.modul_kodu || '').toLowerCase().includes(val) || (m.modul_adi || '').toLowerCase().includes(val));
+            if (eslesen.length) liste.appendChild(listeBasligi('Sistemdeki Modüller (' + eslesen.length + ' adet)'));
+            eslesen.forEach(m => liste.appendChild(oneriSatiri('fa-bolt', '#f59e0b', m.modul_adi || 'İsimsiz Modül', m.modul_kodu, m.modul_kodu, input, liste)));
+            sayi = eslesen.length;
+        } else if (tip === 'alt_menu') {
+            const eslesen = sysMenus.filter(m => (m || '').toLowerCase().includes(val));
+            if (eslesen.length) liste.appendChild(listeBasligi('Mevcut Alt Menüler (' + eslesen.length + ' adet)'));
+            eslesen.forEach(m => liste.appendChild(oneriSatiri('fa-code-branch', '#10b981', m, '', m, input, liste)));
+            sayi = eslesen.length;
+        }
+        input.placeholder = tip === 'link' ? 'https://...' : '';
+        liste.style.display = sayi > 0 ? 'block' : 'none';
+    }
+    document.querySelectorAll('.js-ac-tetik').forEach(function (el) {
+        const calistir = () => runAutocomplete(el.dataset.hedef, el.tagName === 'SELECT' ? el.id : el.dataset.tip, el.dataset.liste);
+        el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', calistir);
+        if (el.tagName !== 'SELECT') el.addEventListener('focus', calistir);
+    });
 
-    async function silMenu(id) {
-        if(!confirm('DİKKAT: Menü silinirse içindeki tüm butonlar da silinir. Onaylıyor musunuz?')) return;
-        const fd = new FormData(); fd.append('action', 'menu_sil'); fd.append('id', id);
-        const res = await fetch('akis', { method: 'POST', body: fd }); const data = await res.json();
-        if(data.success) location.reload();
-    }
-
-    async function silButon(id) {
-        if(!confirm('Butonu silmek istediğinize emin misiniz?')) return;
-        const fd = new FormData(); fd.append('action', 'buton_sil'); fd.append('id', id);
-        const res = await fetch('akis', { method: 'POST', body: fd }); const data = await res.json();
-        if(data.success) location.reload();
-    }
+    // ---------- Form gönderimi ----------
+    document.querySelectorAll('.js-akis-form').forEach(function (form) {
+        form.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const msg = $(form.id + 'Msg');
+            const btn = form.querySelector('button[type="submit"]'); const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> İşleniyor...'; btn.disabled = true;
+            try {
+                const data = await MISTIK.istek('akis', new FormData(form));
+                MISTIK.mesaj(msg, data.message, data.success);
+                if (data.success) { setTimeout(() => location.reload(), 800); return; }
+            } catch (err) { MISTIK.mesaj(msg, 'Sunucu Hatası!', false); }
+            btn.innerHTML = originalText; btn.disabled = false;
+        });
+    });
+})();
 </script>
+<?php
+$extra_js = ob_get_clean();
 
-<?php 
-$page_content = ob_get_clean();
-$layout_path = $base_path . '/admin/layouts/master_layouts.php';
-require_once $layout_path; 
-?>
+require_once __DIR__ . '/../layouts/master_layouts.php';

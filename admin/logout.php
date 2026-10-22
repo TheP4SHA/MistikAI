@@ -1,25 +1,25 @@
 <?php
-// /data/MistikAI/admin/logout.php
+// admin/logout.php - Güvenli çıkış
+// Yalnız CSRF jetonlu POST ile çalışır (başka siteden zorla çıkış yaptırılamasın); GET isteği panele döner.
+require_once __DIR__ . '/_baslat.php';
 
-// 1. Oturumu başlat (açık olan oturumu yakalamak için)
-session_start();
-
-// 2. Tüm oturum değişkenlerini boşalt
-$_SESSION = array();
-
-// 3. Güvenlik: Eğer oturum çerezi kullanılıyorsa, onu da tarayıcıdan sil
-if (ini_get("session.use_cookies")) {
-    $params = session_get_cookie_params();
-    setcookie(session_name(), '', time() - 42000,
-        $params["path"], $params["domain"],
-        $params["secure"], $params["httponly"]
-    );
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    Panel::yonlendir('dashboard');
 }
 
-// 4. Oturumu tamamen sunucudan yok et
+// Oturum verisini boşalt, çerezi oturumla aynı parametrelerle sil, sunucudaki oturumu yok et.
+$_SESSION = [];
+if (ini_get('session.use_cookies')) {
+    $p = session_get_cookie_params();
+    setcookie(session_name(), '', [
+        'expires'  => time() - 42000,
+        'path'     => $p['path'],
+        'domain'   => $p['domain'],
+        'secure'   => $p['secure'],
+        'httponly' => $p['httponly'],
+        'samesite' => $p['samesite'] ?? 'Lax',
+    ]);
+}
 session_destroy();
 
-// 5. YOL DÜZELTİLDİ: Temiz URL (.htaccess) yapısına uygun olarak login'e yönlendir
-header("Location: /OmyoWeb/MistikAI/admin/login");
-exit;
-?>
+Panel::yonlendir('login');

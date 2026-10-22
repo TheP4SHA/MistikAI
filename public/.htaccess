@@ -8,7 +8,7 @@ RewriteRule ^ - [L]
 
 # Admin panel clean URLs
 RewriteRule ^admin/?$ ../admin/login.php [L,NC,QSA]
-RewriteRule ^admin/(login|logout|register)/?$ ../admin/$1.php [L,NC,QSA]
+RewriteRule ^admin/(login|logout|register|kurulum)/?$ ../admin/$1.php [L,NC,QSA]
 RewriteRule ^admin/([a-zA-Z0-9_-]+)/?$ ../admin/pages/$1.php [L,NC,QSA]
 
 # Security: Block direct access to config and data files

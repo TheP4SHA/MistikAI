@@ -1,30 +1,6 @@
 <?php
-// GÜVENLİK DUVARI: Oturum yoksa kodun 1 satır bile aşağı inmesine izin verme, direkt logine şutla!
-if (session_status() === PHP_SESSION_NONE) { session_start(); }
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: /OmyoWeb/MistikAI/admin/login");
-    exit; // exit çok önemlidir, kodun devamının okunmasını KESİN OLARAK keser!
-}
-
-// 1. VERİTABANINA BAĞLAN (Kök Dizin Mantığı ve Canlı Sunucu Yedeği)
-$doc_root = $_SERVER['DOCUMENT_ROOT']; // /var/www/html/
-// YOL DÜZELTİLDİ: Artık data/MistikAI yerine direkt data/ klasörü kullanılıyor.
-$base_path = $doc_root . '/OmyoWeb/MistikAI/data';
-$db_path = $base_path . '/config/db.php';
-
-if (file_exists($db_path)) {
-    require_once $db_path;
-} else {
-    // config/db.php yoksa canlı FOG sunucusuna zorla bağlan
-    try {
-        require_once __DIR__ . '/../../config/db.php';
-        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        die("Kritik Hata: Veritabanı bağlantısı kurulamadı. " . $e->getMessage());
-    }
-}
-global $db;
+// admin/pages/dashboard.php - Komuta Merkezi
+require_once __DIR__ . '/../_baslat.php';
 
 // ======================================================================
 // 2. ULTRA DETAYLI İSTATİSTİKLER (SQL)
@@ -36,8 +12,9 @@ $basarili_genel = (int)$db->query("SELECT COUNT(*) FROM bot_sohbet_loglari WHERE
 $basarisiz_genel = $toplam_mesaj - $basarili_genel;
 $basari_orani_genel = $toplam_mesaj > 0 ? round(($basarili_genel / $toplam_mesaj) * 100) : 0;
 
-$bugun_mesaj = (int)$db->query("SELECT COUNT(*) FROM bot_sohbet_loglari WHERE DATE(islem_tarihi) = CURDATE()")->fetchColumn();
-$basarili_bugun = (int)$db->query("SELECT COUNT(*) FROM bot_sohbet_loglari WHERE anlasildi_mi = 1 AND DATE(islem_tarihi) = CURDATE()")->fetchColumn();
+// islem_tarihi >= CURDATE(): idx_log_tarih indeksini kullanır (DATE(...) kullanamaz)
+$bugun_mesaj = (int)$db->query("SELECT COUNT(*) FROM bot_sohbet_loglari WHERE islem_tarihi >= CURDATE()")->fetchColumn();
+$basarili_bugun = (int)$db->query("SELECT COUNT(*) FROM bot_sohbet_loglari WHERE anlasildi_mi = 1 AND islem_tarihi >= CURDATE()")->fetchColumn();
 $basarisiz_bugun = $bugun_mesaj - $basarili_bugun;
 $basari_orani_bugun = $bugun_mesaj > 0 ? round(($basarili_bugun / $bugun_mesaj) * 100) : 0;
 
@@ -52,6 +29,16 @@ $son_loglar = $db->query("
     LEFT JOIN bot_moduller m ON l.eslesen_modul_id = m.id 
     ORDER BY l.islem_tarihi DESC LIMIT 6
 ")->fetchAll();
+
+// --- KATMAN DAĞILIMI (son 7 gün): hangi katman kaç cevap üretti, ortalama gecikme, anlaşılma oranı ---
+$katman_dagilimi = $db->query("
+    SELECT katman, COUNT(*) AS adet, AVG(gecikme_ms) AS ort_gecikme, SUM(anlasildi_mi = 1) AS anlasilan
+    FROM bot_sohbet_loglari
+    WHERE islem_tarihi >= NOW() - INTERVAL 7 DAY
+    GROUP BY katman
+    ORDER BY adet DESC
+")->fetchAll();
+$katman_toplam = array_sum(array_map('intval', array_column($katman_dagilimi, 'adet')));
 
 // --- MODÜL DAĞILIMI (Pasta Dilimi verisi) ---
 $modul_dagilimi = $db->query("
@@ -177,7 +164,7 @@ ob_start();
     <div class="bento-box col-8">
         <div class="box-title">
             <span><i class="fas fa-stream" style="color: var(--accent-color);"></i> Son Canlı Log Akışı</span>
-            <a href="logger" style="font-size: 0.8rem; color: var(--text-muted); text-decoration: none;">Tümünü Gör <i class="fas fa-arrow-right"></i></a>
+            <a href="<?php echo Guvenlik::e(Panel::url('logger')); ?>" style="font-size: 0.8rem; color: var(--text-muted); text-decoration: none;">Tümünü Gör <i class="fas fa-arrow-right"></i></a>
         </div>
         <div style="padding-left: 10px;">
             <?php if(empty($son_loglar)): ?>
@@ -186,14 +173,14 @@ ob_start();
                 <?php foreach($son_loglar as $log): 
                     $is_success = $log['anlasildi_mi'] == 1;
                     $status_class = $is_success ? 'success' : 'danger';
-                    $saf_mesaj = htmlspecialchars($log['kullanici_mesaji']);
+                    $saf_mesaj = Guvenlik::e($log['kullanici_mesaji']);
                 ?>
                 <div class="live-feed-item <?php echo $status_class; ?>">
-                    <div class="live-time"><?php echo date('H:i:s', strtotime($log['islem_tarihi'])); ?> - <span style="opacity:0.7;">Güven: %<?php echo $log['guven_skoru']; ?></span></div>
+                    <div class="live-time"><?php echo date('H:i:s', strtotime($log['islem_tarihi'])); ?> - <span style="opacity:0.7;">Güven: %<?php echo (int)$log['guven_skoru']; ?></span> <?php echo Panel::katmanRozeti($log['katman'] ?? null); ?><?php if (isset($log['gecikme_ms'])): ?> <span style="opacity:0.7;"><?php echo (int)$log['gecikme_ms']; ?> ms</span><?php endif; ?></div>
                     <div class="live-msg">"<?php echo $saf_mesaj; ?>"</div>
                     <div class="live-intent">
                         <?php if($is_success): ?>
-                            <i class="fas fa-robot"></i> Algılanan Niyet: <?php echo htmlspecialchars($log['modul_adi']); ?>
+                            <i class="fas fa-robot"></i> Algılanan Niyet: <?php echo Guvenlik::e($log['modul_adi'] ?? ($log['algilanan_niyet'] ?? 'Genel Sohbet')); ?>
                         <?php else: ?>
                             <i class="fas fa-times-circle" style="color: var(--danger-color);"></i> Sistem bu cümleyi anlayamadı.
                         <?php endif; ?>
@@ -220,14 +207,46 @@ ob_start();
                 ?>
                 <div style="margin-bottom: 1rem;">
                     <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 5px;">
-                        <span><?php echo htmlspecialchars($mod['modul_adi']); ?></span>
-                        <span style="font-weight: 600;"><?php echo $mod['adet']; ?> Kez</span>
+                        <span><?php echo Guvenlik::e($mod['modul_adi']); ?></span>
+                        <span style="font-weight: 600;"><?php echo (int)$mod['adet']; ?> Kez</span>
                     </div>
                     <div class="progress-track"><div class="progress-fill" style="width: <?php echo $yuzde; ?>%; background: <?php echo $renk; ?>;"></div></div>
                 </div>
                 <?php endforeach; ?>
             <?php endif; ?>
         </div>
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <div class="bento-box col-12">
+        <div class="box-title">
+            <span><i class="fas fa-layer-group" style="color: var(--accent-color);"></i> Cevap Katmanları (Son 7 Gün)</span>
+            <span style="font-size: 0.8rem; color: var(--text-muted);"><?php echo number_format($katman_toplam); ?> mesaj</span>
+        </div>
+        <?php if (empty($katman_dagilimi)): ?>
+            <div style="color: var(--text-muted); text-align: center; padding: 1rem;">Son 7 günde kayıt yok.</div>
+        <?php else: ?>
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1rem;">
+            <?php foreach ($katman_dagilimi as $k):
+                $adet = (int)$k['adet'];
+                $oran = $katman_toplam > 0 ? round($adet / $katman_toplam * 100) : 0;
+                $anlasilma = $adet > 0 ? round((int)$k['anlasilan'] / $adet * 100) : 0;
+                $sorgu = ['katman' => $k['katman'] ?? 'yok'];
+            ?>
+            <a href="<?php echo Guvenlik::e(Panel::url('logger', $sorgu)); ?>" class="data-item" style="flex-direction:column; align-items:flex-start; gap:6px; text-decoration:none; color:inherit;">
+                <div style="display:flex; justify-content:space-between; width:100%; align-items:center;">
+                    <?php echo Panel::katmanRozeti($k['katman']); ?>
+                    <b><?php echo number_format($adet); ?></b>
+                </div>
+                <div class="progress-track"><div class="progress-fill" style="width: <?php echo $oran; ?>%; background: var(--accent-color);"></div></div>
+                <div style="font-size:0.75rem; color:var(--text-muted);">
+                    %<?php echo $oran; ?> pay · %<?php echo $anlasilma; ?> anlaşıldı<?php if ($k['ort_gecikme'] !== null): ?> · ort. <?php echo (int)round((float)$k['ort_gecikme']); ?> ms<?php endif; ?>
+                </div>
+            </a>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -239,8 +258,8 @@ ob_start();
         <div class="data-list">
             <?php foreach($top_basarili as $item): ?>
             <div class="data-item">
-                <div class="item-text"><i class="fas fa-check" style="color: var(--success-color);"></i> "<?php echo htmlspecialchars($item['kullanici_mesaji']); ?>"</div>
-                <div class="item-count" style="color: var(--success-color);"><?php echo $item['adet']; ?></div>
+                <div class="item-text"><i class="fas fa-check" style="color: var(--success-color);"></i> "<?php echo Guvenlik::e($item['kullanici_mesaji']); ?>"</div>
+                <div class="item-count" style="color: var(--success-color);"><?php echo (int)$item['adet']; ?></div>
             </div>
             <?php endforeach; ?>
             <?php if(empty($top_basarili)) echo '<div style="color: var(--text-muted); padding: 1rem;">Veri yok.</div>'; ?>
@@ -250,13 +269,13 @@ ob_start();
     <div class="bento-box col-6" style="border-color: rgba(239, 68, 68, 0.3);">
         <div class="box-title" style="border-bottom-color: rgba(239,68,68,0.3);">
             <span style="color: var(--danger-color);"><i class="fas fa-skull-crossbones"></i> En Çok Takılan Kelimeler (Kör Nokta)</span>
-            <a href="logger" class="btn-outline" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;"><i class="fas fa-graduation-cap"></i> Eğit</a>
+            <a href="<?php echo Guvenlik::e(Panel::url('logger')); ?>" class="btn-outline" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;"><i class="fas fa-graduation-cap"></i> Eğit</a>
         </div>
         <div class="data-list">
             <?php foreach($top_basarisiz as $item): ?>
             <div class="data-item" style="background: rgba(239,68,68,0.05);">
-                <div class="item-text"><i class="fas fa-exclamation-circle" style="color: var(--danger-color);"></i> "<?php echo htmlspecialchars($item['kullanici_mesaji']); ?>"</div>
-                <div class="item-count" style="background: var(--danger-color); color: white;"><?php echo $item['adet']; ?></div>
+                <div class="item-text"><i class="fas fa-exclamation-circle" style="color: var(--danger-color);"></i> "<?php echo Guvenlik::e($item['kullanici_mesaji']); ?>"</div>
+                <div class="item-count" style="background: var(--danger-color); color: white;"><?php echo (int)$item['adet']; ?></div>
             </div>
             <?php endforeach; ?>
             <?php if(empty($top_basarisiz)) echo '<div style="color: var(--success-color); padding: 1rem;"><i class="fas fa-check-circle"></i> Sistem kusursuz, tekrarlayan hata yok!</div>'; ?>
@@ -267,12 +286,4 @@ ob_start();
 <?php 
 $page_content = ob_get_clean();
 
-// 4. LAYOUT YOLU DÜZELTİLDİ (Mutlak Yol)
-// YOL DÜZELTİLDİ: /data/admin/layouts/master_layouts.php
-$layout_path = $base_path . '/admin/layouts/master_layouts.php';
-if (file_exists($layout_path)) {
-    require_once $layout_path; 
-} else {
-    echo "HATA: Layout dosyası bulunamadı: " . $layout_path;
-}
-?>
+require_once __DIR__ . '/../layouts/master_layouts.php';

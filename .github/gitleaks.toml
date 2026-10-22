@@ -1,0 +1,15 @@
+# gitleaks configuration: default rules plus the placeholders used in
+# config/db.php.example and the docs. Real secrets never belong in the repo;
+# config/db.php is git-ignored.
+title = "MistikAI"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented placeholder values"
+regexes = [
+  '''gsk_your_groq_api_key_here''',
+  '''your_db_(user|password)''',
+  '''change-me-to-a-long-random-string''',
+]

@@ -1,5 +1,6 @@
 -- MistikAI Database Schema
--- Version: 1.0
+-- Version: 1.1 (yetki, giriş denemeleri, log katmanı)
+-- Mevcut kurulumlar için: database/migrations/2026-10-guvenlik.sql
 -- Character Set: utf8mb4
 
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
@@ -16,6 +17,7 @@ CREATE TABLE IF NOT EXISTS `bot_admin_users` (
   `kullanici_adi` varchar(50) NOT NULL,
   `sifre` varchar(255) NOT NULL COMMENT 'bcrypt hashed',
   `ad_soyad` varchar(100) NOT NULL,
+  `yetki` enum('tam','kisitli') NOT NULL DEFAULT 'kisitli' COMMENT 'tam: kullanıcı ekleme, kod editörü, SQL terminali',
   `kayit_tarihi` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `kullanici_adi` (`kullanici_adi`)
@@ -108,17 +110,20 @@ CREATE TABLE IF NOT EXISTS `bot_varlik_esanlamlilar` (
 -- ========================================
 CREATE TABLE IF NOT EXISTS `bot_sohbet_loglari` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
-  `session_id` varchar(100) NOT NULL,
+  `session_id` varchar(100) NOT NULL COMMENT 'Ziyaretçinin tuzlu IP özeti (64 karakter hex), ham IP değil',
   `kullanici_mesaji` text NOT NULL,
   `bot_cevabi` text DEFAULT NULL,
   `eslesen_modul_id` int(11) DEFAULT NULL,
   `algilanan_niyet` varchar(50) DEFAULT NULL,
   `guven_skoru` int(11) DEFAULT 0 COMMENT '0-100 güven skoru',
   `anlasildi_mi` tinyint(1) DEFAULT 0 COMMENT '1=anlaşıldı, 0=kör nokta',
+  `katman` varchar(10) DEFAULT NULL COMMENT 'Cevabı üreten katman: kural|bert|llm|akis|komut|sinir',
+  `gecikme_ms` int(11) DEFAULT NULL COMMENT 'Cevap üretme süresi (milisaniye)',
   `islem_tarihi` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `eslesen_modul_id` (`eslesen_modul_id`),
   KEY `idx_log_anlasildi` (`anlasildi_mi`),
+  KEY `idx_log_tarih` (`islem_tarihi`),
   CONSTRAINT `fk_log_modul` FOREIGN KEY (`eslesen_modul_id`) REFERENCES `bot_moduller` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -196,7 +201,7 @@ CREATE TABLE IF NOT EXISTS `bot_icerik_yonetimi` (
 -- API Rate Limiting
 -- ========================================
 CREATE TABLE IF NOT EXISTS `bot_api_rate_limit` (
-  `ip_address` varchar(45) NOT NULL,
+  `ip_address` varchar(64) NOT NULL COMMENT 'Tuzlu IP özeti (64 karakter hex)',
   `request_count` int(11) NOT NULL,
   `last_request` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`ip_address`)
@@ -210,6 +215,22 @@ CREATE TABLE IF NOT EXISTS `bot_sistem_ayarlari` (
   `ayar_degeri` varchar(255) NOT NULL,
   PRIMARY KEY (`ayar_adi`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Güvenli varsayılan: panelden yeni yönetici ekleme kapalı.
+INSERT IGNORE INTO `bot_sistem_ayarlari` (`ayar_adi`, `ayar_degeri`) VALUES ('admin_kayit_acik', '0');
+
+-- ========================================
+-- Admin Giriş Denemeleri (kaba kuvvet freni)
+-- ========================================
+CREATE TABLE IF NOT EXISTS `bot_giris_denemeleri` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `ip_ozeti` char(64) NOT NULL COMMENT 'Tuzlu IP özeti',
+  `kullanici_adi` varchar(50) NOT NULL COMMENT 'Denenen kullanıcı adı (küçük harf)',
+  `deneme_tarihi` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_giris_ip_kullanici` (`ip_ozeti`, `kullanici_adi`, `deneme_tarihi`),
+  KEY `idx_giris_tarih` (`deneme_tarihi`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ========================================
 -- Diyalog Akış Menüleri (Flow Builder)
