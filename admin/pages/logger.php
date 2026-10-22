@@ -68,6 +68,10 @@ $offset = ($page - 1) * $limit;
 $filter_status = in_array($_GET['status'] ?? '', ['success', 'fail'], true) ? $_GET['status'] : 'all';
 $filter_search = trim((string)($_GET['q'] ?? ''));
 $filter_session = trim((string)($_GET['sess'] ?? ''));
+$filter_katman = (string)($_GET['katman'] ?? '');
+if ($filter_katman !== 'yok' && !isset(Panel::KATMANLAR[$filter_katman])) {
+    $filter_katman = '';
+}
 
 $where_clauses = ["1=1"];
 $params = [];
@@ -83,6 +87,13 @@ if ($filter_search !== '') {
 if ($filter_session !== '') {
     $where_clauses[] = "l.session_id = :sess";
     $params[':sess'] = $filter_session;
+}
+
+if ($filter_katman === 'yok') {
+    $where_clauses[] = "l.katman IS NULL";
+} elseif ($filter_katman !== '') {
+    $where_clauses[] = "l.katman = :katman";
+    $params[':katman'] = $filter_katman;
 }
 
 $where_sql = implode(' AND ', $where_clauses);
@@ -114,6 +125,7 @@ function loggerUrl(array $degisen): string {
         'status' => $GLOBALS['filter_status'] !== 'all' ? $GLOBALS['filter_status'] : null,
         'q'      => $GLOBALS['filter_search'] ?: null,
         'sess'   => $GLOBALS['filter_session'] ?: null,
+        'katman' => $GLOBALS['filter_katman'] ?: null,
     ]);
     return Panel::url('logger', array_filter(array_merge($sorgu, $degisen), fn($v) => $v !== null && $v !== ''));
 }
@@ -173,7 +185,10 @@ function renderLogRow(array $log, bool $is_main, int $group_id, int $log_count =
     }
     $skor = (int)$log['guven_skoru'];
     $rozet = $skor >= 70 ? 'success' : ($skor >= 30 ? 'warning' : 'danger');
-    echo '<span class="badge ' . $rozet . '">%' . $skor . '</span>';
+    echo '<span class="badge ' . $rozet . '">%' . $skor . '</span> ' . Panel::katmanRozeti($log['katman'] ?? null);
+    if (isset($log['gecikme_ms'])) {
+        echo '<div style="font-size:0.75rem; color:var(--text-muted); margin-top:5px;"><i class="fas fa-stopwatch"></i> ' . (int)$log['gecikme_ms'] . ' ms</div>';
+    }
     echo '</td>';
 
     // 5. Aksiyon (mesaj data-kelime özniteliğinde; tıklama addEventListener ile yakalanır)
@@ -251,6 +266,15 @@ ob_start();
             <option value="fail" <?php echo $filter_status === 'fail' ? 'selected' : ''; ?>>❌ Kör Noktalar</option>
         </select>
     </div>
+    <div class="filter-group" style="flex: 0 0 170px;">
+        <select name="katman" class="filter-select" title="Cevabı üreten katman">
+            <option value="">Tüm Katmanlar</option>
+            <?php foreach (Panel::KATMANLAR as $k => [$etiket]): ?>
+                <option value="<?php echo Guvenlik::e($k); ?>" <?php echo $filter_katman === $k ? 'selected' : ''; ?>><?php echo Guvenlik::e($etiket); ?></option>
+            <?php endforeach; ?>
+            <option value="yok" <?php echo $filter_katman === 'yok' ? 'selected' : ''; ?>>Katmansız (eski kayıt)</option>
+        </select>
+    </div>
     <div class="filter-group">
         <i class="fas fa-search" style="color: var(--text-muted); position:absolute; margin-left:10px;"></i>
         <input type="text" name="q" class="filter-input" placeholder="Kelime veya cümle ara..." value="<?php echo Guvenlik::e($filter_search); ?>" style="padding-left: 35px;">
@@ -271,7 +295,7 @@ ob_start();
                 <th width="140">Tarih / Saat</th>
                 <th width="150">Ziyaretçi (IP özeti)</th>
                 <th>Yazışma (Kullanıcı & Bot)</th>
-                <th width="160">Niyet & Güven</th>
+                <th width="170">Niyet, Güven & Katman</th>
                 <th width="120">Aksiyon</th>
             </tr>
         </thead>

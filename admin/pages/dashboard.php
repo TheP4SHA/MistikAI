@@ -12,8 +12,9 @@ $basarili_genel = (int)$db->query("SELECT COUNT(*) FROM bot_sohbet_loglari WHERE
 $basarisiz_genel = $toplam_mesaj - $basarili_genel;
 $basari_orani_genel = $toplam_mesaj > 0 ? round(($basarili_genel / $toplam_mesaj) * 100) : 0;
 
-$bugun_mesaj = (int)$db->query("SELECT COUNT(*) FROM bot_sohbet_loglari WHERE DATE(islem_tarihi) = CURDATE()")->fetchColumn();
-$basarili_bugun = (int)$db->query("SELECT COUNT(*) FROM bot_sohbet_loglari WHERE anlasildi_mi = 1 AND DATE(islem_tarihi) = CURDATE()")->fetchColumn();
+// islem_tarihi >= CURDATE(): idx_log_tarih indeksini kullanır (DATE(...) kullanamaz)
+$bugun_mesaj = (int)$db->query("SELECT COUNT(*) FROM bot_sohbet_loglari WHERE islem_tarihi >= CURDATE()")->fetchColumn();
+$basarili_bugun = (int)$db->query("SELECT COUNT(*) FROM bot_sohbet_loglari WHERE anlasildi_mi = 1 AND islem_tarihi >= CURDATE()")->fetchColumn();
 $basarisiz_bugun = $bugun_mesaj - $basarili_bugun;
 $basari_orani_bugun = $bugun_mesaj > 0 ? round(($basarili_bugun / $bugun_mesaj) * 100) : 0;
 
@@ -28,6 +29,16 @@ $son_loglar = $db->query("
     LEFT JOIN bot_moduller m ON l.eslesen_modul_id = m.id 
     ORDER BY l.islem_tarihi DESC LIMIT 6
 ")->fetchAll();
+
+// --- KATMAN DAĞILIMI (son 7 gün): hangi katman kaç cevap üretti, ortalama gecikme, anlaşılma oranı ---
+$katman_dagilimi = $db->query("
+    SELECT katman, COUNT(*) AS adet, AVG(gecikme_ms) AS ort_gecikme, SUM(anlasildi_mi = 1) AS anlasilan
+    FROM bot_sohbet_loglari
+    WHERE islem_tarihi >= NOW() - INTERVAL 7 DAY
+    GROUP BY katman
+    ORDER BY adet DESC
+")->fetchAll();
+$katman_toplam = array_sum(array_map('intval', array_column($katman_dagilimi, 'adet')));
 
 // --- MODÜL DAĞILIMI (Pasta Dilimi verisi) ---
 $modul_dagilimi = $db->query("
@@ -165,11 +176,11 @@ ob_start();
                     $saf_mesaj = Guvenlik::e($log['kullanici_mesaji']);
                 ?>
                 <div class="live-feed-item <?php echo $status_class; ?>">
-                    <div class="live-time"><?php echo date('H:i:s', strtotime($log['islem_tarihi'])); ?> - <span style="opacity:0.7;">Güven: %<?php echo (int)$log['guven_skoru']; ?></span></div>
+                    <div class="live-time"><?php echo date('H:i:s', strtotime($log['islem_tarihi'])); ?> - <span style="opacity:0.7;">Güven: %<?php echo (int)$log['guven_skoru']; ?></span> <?php echo Panel::katmanRozeti($log['katman'] ?? null); ?><?php if (isset($log['gecikme_ms'])): ?> <span style="opacity:0.7;"><?php echo (int)$log['gecikme_ms']; ?> ms</span><?php endif; ?></div>
                     <div class="live-msg">"<?php echo $saf_mesaj; ?>"</div>
                     <div class="live-intent">
                         <?php if($is_success): ?>
-                            <i class="fas fa-robot"></i> Algılanan Niyet: <?php echo Guvenlik::e($log['modul_adi']); ?>
+                            <i class="fas fa-robot"></i> Algılanan Niyet: <?php echo Guvenlik::e($log['modul_adi'] ?? ($log['algilanan_niyet'] ?? 'Genel Sohbet')); ?>
                         <?php else: ?>
                             <i class="fas fa-times-circle" style="color: var(--danger-color);"></i> Sistem bu cümleyi anlayamadı.
                         <?php endif; ?>
@@ -204,6 +215,38 @@ ob_start();
                 <?php endforeach; ?>
             <?php endif; ?>
         </div>
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <div class="bento-box col-12">
+        <div class="box-title">
+            <span><i class="fas fa-layer-group" style="color: var(--accent-color);"></i> Cevap Katmanları (Son 7 Gün)</span>
+            <span style="font-size: 0.8rem; color: var(--text-muted);"><?php echo number_format($katman_toplam); ?> mesaj</span>
+        </div>
+        <?php if (empty($katman_dagilimi)): ?>
+            <div style="color: var(--text-muted); text-align: center; padding: 1rem;">Son 7 günde kayıt yok.</div>
+        <?php else: ?>
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1rem;">
+            <?php foreach ($katman_dagilimi as $k):
+                $adet = (int)$k['adet'];
+                $oran = $katman_toplam > 0 ? round($adet / $katman_toplam * 100) : 0;
+                $anlasilma = $adet > 0 ? round((int)$k['anlasilan'] / $adet * 100) : 0;
+                $sorgu = ['katman' => $k['katman'] ?? 'yok'];
+            ?>
+            <a href="<?php echo Guvenlik::e(Panel::url('logger', $sorgu)); ?>" class="data-item" style="flex-direction:column; align-items:flex-start; gap:6px; text-decoration:none; color:inherit;">
+                <div style="display:flex; justify-content:space-between; width:100%; align-items:center;">
+                    <?php echo Panel::katmanRozeti($k['katman']); ?>
+                    <b><?php echo number_format($adet); ?></b>
+                </div>
+                <div class="progress-track"><div class="progress-fill" style="width: <?php echo $oran; ?>%; background: var(--accent-color);"></div></div>
+                <div style="font-size:0.75rem; color:var(--text-muted);">
+                    %<?php echo $oran; ?> pay · %<?php echo $anlasilma; ?> anlaşıldı<?php if ($k['ort_gecikme'] !== null): ?> · ort. <?php echo (int)round((float)$k['ort_gecikme']); ?> ms<?php endif; ?>
+                </div>
+            </a>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
     </div>
 </div>
 

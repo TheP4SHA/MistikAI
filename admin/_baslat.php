@@ -154,6 +154,23 @@ final class Panel {
         return $deger === false ? $varsayilan : (string)$deger;
     }
 
+    /** bot_sohbet_loglari.katman değerleri: cevabı hangi katman üretti. [etiket, renk] */
+    public const KATMANLAR = [
+        'kural' => ['Kural', '#10b981'],
+        'bert'  => ['BERT', '#3b82f6'],
+        'llm'   => ['LLM', '#8b5cf6'],
+        'akis'  => ['Akış', '#f59e0b'],
+        'komut' => ['Komut', '#14b8a6'],
+        'sinir' => ['Sınır', '#ef4444'],
+    ];
+
+    /** Katman rozeti (HTML). Bilinmeyen/boş katman (eski kayıtlar) gri gösterilir. */
+    public static function katmanRozeti(?string $katman): string {
+        [$etiket, $renk] = self::KATMANLAR[$katman ?? ''] ?? [$katman ? $katman : '—', '#64748b'];
+        return '<span class="badge" style="background:' . $renk . '22; color:' . $renk . '; border:1px solid ' . $renk . '55;">'
+             . Guvenlik::e($etiket) . '</span>';
+    }
+
     /** JS'in kullandığı panel bilgileri: CSRF jetonu ve sayfa URL'leri (layout <head> içinde basılır). */
     public static function jsAyarlari(): string {
         $urller = [];
