@@ -162,14 +162,14 @@ ob_start();
                 <?php foreach($son_loglar as $log): 
                     $is_success = $log['anlasildi_mi'] == 1;
                     $status_class = $is_success ? 'success' : 'danger';
-                    $saf_mesaj = htmlspecialchars($log['kullanici_mesaji']);
+                    $saf_mesaj = Guvenlik::e($log['kullanici_mesaji']);
                 ?>
                 <div class="live-feed-item <?php echo $status_class; ?>">
-                    <div class="live-time"><?php echo date('H:i:s', strtotime($log['islem_tarihi'])); ?> - <span style="opacity:0.7;">Güven: %<?php echo $log['guven_skoru']; ?></span></div>
+                    <div class="live-time"><?php echo date('H:i:s', strtotime($log['islem_tarihi'])); ?> - <span style="opacity:0.7;">Güven: %<?php echo (int)$log['guven_skoru']; ?></span></div>
                     <div class="live-msg">"<?php echo $saf_mesaj; ?>"</div>
                     <div class="live-intent">
                         <?php if($is_success): ?>
-                            <i class="fas fa-robot"></i> Algılanan Niyet: <?php echo htmlspecialchars($log['modul_adi']); ?>
+                            <i class="fas fa-robot"></i> Algılanan Niyet: <?php echo Guvenlik::e($log['modul_adi']); ?>
                         <?php else: ?>
                             <i class="fas fa-times-circle" style="color: var(--danger-color);"></i> Sistem bu cümleyi anlayamadı.
                         <?php endif; ?>
@@ -196,8 +196,8 @@ ob_start();
                 ?>
                 <div style="margin-bottom: 1rem;">
                     <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 5px;">
-                        <span><?php echo htmlspecialchars($mod['modul_adi']); ?></span>
-                        <span style="font-weight: 600;"><?php echo $mod['adet']; ?> Kez</span>
+                        <span><?php echo Guvenlik::e($mod['modul_adi']); ?></span>
+                        <span style="font-weight: 600;"><?php echo (int)$mod['adet']; ?> Kez</span>
                     </div>
                     <div class="progress-track"><div class="progress-fill" style="width: <?php echo $yuzde; ?>%; background: <?php echo $renk; ?>;"></div></div>
                 </div>
@@ -215,8 +215,8 @@ ob_start();
         <div class="data-list">
             <?php foreach($top_basarili as $item): ?>
             <div class="data-item">
-                <div class="item-text"><i class="fas fa-check" style="color: var(--success-color);"></i> "<?php echo htmlspecialchars($item['kullanici_mesaji']); ?>"</div>
-                <div class="item-count" style="color: var(--success-color);"><?php echo $item['adet']; ?></div>
+                <div class="item-text"><i class="fas fa-check" style="color: var(--success-color);"></i> "<?php echo Guvenlik::e($item['kullanici_mesaji']); ?>"</div>
+                <div class="item-count" style="color: var(--success-color);"><?php echo (int)$item['adet']; ?></div>
             </div>
             <?php endforeach; ?>
             <?php if(empty($top_basarili)) echo '<div style="color: var(--text-muted); padding: 1rem;">Veri yok.</div>'; ?>
@@ -231,8 +231,8 @@ ob_start();
         <div class="data-list">
             <?php foreach($top_basarisiz as $item): ?>
             <div class="data-item" style="background: rgba(239,68,68,0.05);">
-                <div class="item-text"><i class="fas fa-exclamation-circle" style="color: var(--danger-color);"></i> "<?php echo htmlspecialchars($item['kullanici_mesaji']); ?>"</div>
-                <div class="item-count" style="background: var(--danger-color); color: white;"><?php echo $item['adet']; ?></div>
+                <div class="item-text"><i class="fas fa-exclamation-circle" style="color: var(--danger-color);"></i> "<?php echo Guvenlik::e($item['kullanici_mesaji']); ?>"</div>
+                <div class="item-count" style="background: var(--danger-color); color: white;"><?php echo (int)$item['adet']; ?></div>
             </div>
             <?php endforeach; ?>
             <?php if(empty($top_basarisiz)) echo '<div style="color: var(--success-color); padding: 1rem;"><i class="fas fa-check-circle"></i> Sistem kusursuz, tekrarlayan hata yok!</div>'; ?>
