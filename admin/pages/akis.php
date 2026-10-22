@@ -72,6 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             if ($action === 'menu_ekle') {
                 $db->prepare("INSERT INTO bot_akis_menuleri (menu_kodu, mesaj) VALUES (?, ?)")->execute([$kodu, $mesaj]);
+                Panel::kuralOnbelleginiTemizle();
                 Panel::json(['success' => true, 'message' => 'Yeni diyalog düğümü oluşturuldu!']);
             }
             $eski = $db->prepare("SELECT menu_kodu FROM bot_akis_menuleri WHERE id = ?");
@@ -87,6 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $db->prepare("UPDATE bot_akis_butonlari SET hedef_veri = ? WHERE aksiyon_tipi = 'alt_menu' AND hedef_veri = ?")->execute([$kodu, $eski_kod]);
             }
             $db->commit();
+            Panel::kuralOnbelleginiTemizle();
             Panel::json(['success' => true, 'message' => 'Menü başarıyla güncellendi!']);
         } catch (Throwable $e) {
             if ($db->inTransaction()) { $db->rollBack(); }
@@ -97,6 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'menu_sil') {
         try {
             $db->prepare("DELETE FROM bot_akis_menuleri WHERE id = ?")->execute([(int)($_POST['id'] ?? 0)]);
+            Panel::kuralOnbelleginiTemizle();
             Panel::json(['success' => true]);
         } catch (Throwable $e) {
             Panel::json(['success' => false, 'message' => Panel::hata($e, 'akış menüsü silme')]);
@@ -114,6 +117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         try {
             $db->prepare("INSERT INTO bot_akis_butonlari (ust_menu_id, buton_metni, aksiyon_tipi, hedef_veri, siralama) VALUES (?, ?, ?, ?, ?)")
                ->execute([$ust_id, $metin, $tip, $hedef, $sira]);
+            Panel::kuralOnbelleginiTemizle();
             Panel::json(['success' => true, 'message' => 'Buton başarıyla eklendi!']);
         } catch (Throwable $e) {
             Panel::json(['success' => false, 'message' => Panel::hata($e, 'akış butonu ekleme')]);
@@ -126,6 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         try {
             $upd = $db->prepare("UPDATE bot_akis_butonlari SET buton_metni = ?, aksiyon_tipi = ?, hedef_veri = ?, siralama = ? WHERE id = ?");
             $upd->execute([$metin, $tip, $hedef, $sira, $id]);
+            Panel::kuralOnbelleginiTemizle();
             Panel::json(['success' => true, 'message' => 'Buton başarıyla güncellendi!']);
         } catch (Throwable $e) {
             Panel::json(['success' => false, 'message' => Panel::hata($e, 'akış butonu düzenleme')]);
@@ -135,6 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'buton_sil') {
         try {
             $db->prepare("DELETE FROM bot_akis_butonlari WHERE id = ?")->execute([(int)($_POST['id'] ?? 0)]);
+            Panel::kuralOnbelleginiTemizle();
             Panel::json(['success' => true]);
         } catch (Throwable $e) {
             Panel::json(['success' => false, 'message' => Panel::hata($e, 'akış butonu silme')]);

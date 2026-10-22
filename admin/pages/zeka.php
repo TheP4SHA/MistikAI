@@ -62,6 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             Panel::json(['success' => false, 'message' => Panel::hata($e, 'zeka ekleme')]);
         }
         if ($eklenen > 0) {
+            Panel::kuralOnbelleginiTemizle();
             Panel::json(['success' => true, 'message' => "$eklenen yeni zeka kuralı başarıyla eklendi! ($esgecilen zaten vardı)"]);
         }
         Panel::json(['success' => false, 'message' => 'Yazdığınız kelimeler zaten sistemde mevcut.']);
@@ -77,6 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         try {
             $update = $db->prepare("UPDATE bot_anahtar_kelimeler SET kelime = ?, oncelik = ?, zaman_kontrol = ?, cevap_override = ? WHERE id = ? AND modul_id = ?");
             $update->execute([$kelime, $oncelik, $zaman, $override, $kelime_id, $modul_id]);
+            Panel::kuralOnbelleginiTemizle();
             Panel::json(['success' => true, 'message' => 'Güncellendi!']);
         } catch (Throwable $e) {
             Panel::json(['success' => false, 'message' => Panel::hata($e, 'zeka düzenleme')]);
@@ -86,6 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'zeka_sil') {
         try {
             $db->prepare("DELETE FROM bot_anahtar_kelimeler WHERE id = ? AND modul_id = ?")->execute([(int)($_POST['kelime_id'] ?? 0), $modul_id]);
+            Panel::kuralOnbelleginiTemizle();
             Panel::json(['success' => true]);
         } catch (Throwable $e) {
             Panel::json(['success' => false, 'message' => Panel::hata($e, 'zeka silme')]);

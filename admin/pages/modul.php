@@ -123,10 +123,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $degerler = [$kodu, $adi, $cevap === '' ? null : $cevap, $buton_metni === '' ? null : $buton_metni, $link_url === '' ? null : $link_url];
             if ($action === 'modul_ekle') {
                 $db->prepare("INSERT INTO bot_moduller (modul_kodu, modul_adi, cevap_metni, buton_metni, link_url, aktif_mi) VALUES (?, ?, ?, ?, ?, 1)")->execute($degerler);
+                Panel::kuralOnbelleginiTemizle();
                 Panel::json(['success' => true, 'message' => 'Yetenek başarıyla sisteme eklendi!']);
             }
             $degerler[] = $modul_id;
             $db->prepare("UPDATE bot_moduller SET modul_kodu = ?, modul_adi = ?, cevap_metni = ?, buton_metni = ?, link_url = ? WHERE id = ?")->execute($degerler);
+            Panel::kuralOnbelleginiTemizle();
             Panel::json(['success' => true, 'message' => 'Modül başarıyla güncellendi!']);
         } catch (Throwable $e) {
             Panel::json(['success' => false, 'message' => Panel::hata($e, 'modül kaydı')]);
@@ -137,6 +139,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $yeni_durum = ($_POST['yeni_durum'] ?? '') === '1' ? 1 : 0;
         try {
             $db->prepare("UPDATE bot_moduller SET aktif_mi = ? WHERE id = ?")->execute([$yeni_durum, (int)($_POST['modul_id'] ?? 0)]);
+            Panel::kuralOnbelleginiTemizle();
             Panel::json(['success' => true, 'message' => 'Durum güncellendi!']);
         } catch (Throwable $e) {
             Panel::json(['success' => false, 'message' => Panel::hata($e, 'modül durumu')]);
@@ -150,6 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $db->prepare("DELETE FROM bot_anahtar_kelimeler WHERE modul_id = ?")->execute([$modul_id]);
             $db->prepare("DELETE FROM bot_moduller WHERE id = ?")->execute([$modul_id]);
             $db->commit();
+            Panel::kuralOnbelleginiTemizle();
             Panel::json(['success' => true, 'message' => 'Modül ve içindeki tüm kelimeler kalıcı olarak silindi!']);
         } catch (Throwable $e) {
             if ($db->inTransaction()) { $db->rollBack(); }
@@ -172,6 +176,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 Panel::json(['success' => true, 'type' => 'select', 'message' => count($results) . ' satır getirildi.', 'data' => array_slice($results, 0, 500)]);
             }
             $affected = $db->exec($sql_query);
+            Panel::kuralOnbelleginiTemizle();
             Panel::json(['success' => true, 'type' => 'exec', 'message' => "Sorgu çalıştırıldı! Etkilenen: $affected"]);
         } catch (PDOException $e) {
             error_log('[MistikAI admin] SQL terminali hatası: ' . $e->getMessage());
@@ -208,6 +213,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if (is_file($file_path) && !unlink($file_path)) {
                 Panel::json(['success' => false, 'message' => 'Dosya silinemedi (izinleri kontrol edin).']);
             }
+            Panel::kuralOnbelleginiTemizle();
             Panel::json(['success' => true, 'message' => 'Kod silindi. Modül statik (veritabanı) moduna döndü.']);
         }
 
@@ -222,6 +228,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             Panel::json(['success' => false, 'message' => 'Dosya yazılamadı (modules dizininin izinlerini kontrol edin).']);
         }
         error_log('[MistikAI admin] Modül dosyası güncellendi: modules/' . $modul_kodu . '.php, kullanıcı #' . (int)Panel::kullanici()['id']);
+        Panel::kuralOnbelleginiTemizle();
         Panel::json(['success' => true, 'message' => 'Kod kaydedildi ve canlıya alındı (sözdizimi denetimi: ' . $lint . ').']);
     }
 

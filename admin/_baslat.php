@@ -146,6 +146,25 @@ final class Panel {
         return ($GLOBALS['ADMIN_KOD_EDITORU'] ?? false) === true && self::tamYetkili();
     }
 
+    /**
+     * Motorun anahtar kelime/modül/akış önbelleğini boşaltır (RuleBasedRouter yaklaşık 60 sn önbellekler).
+     * Anahtar kelime, modül ya da akış değişikliği kaydedildikten sonra çağrılır. Motor sürümünde yöntem
+     * yoksa sessizce geçer; önbellek temizlenemezse kayıt bozulmaz, yalnız günlüğe yazılır.
+     */
+    public static function kuralOnbelleginiTemizle(): void {
+        try {
+            $dosya = __DIR__ . '/../src/RuleBasedRouter.php';
+            if (!class_exists('RuleBasedRouter', false) && is_file($dosya)) {
+                require_once $dosya;
+            }
+            if (class_exists('RuleBasedRouter', false) && method_exists('RuleBasedRouter', 'onbellekTemizle')) {
+                RuleBasedRouter::onbellekTemizle();
+            }
+        } catch (Throwable $e) {
+            self::hata($e, 'önbellek temizleme');
+        }
+    }
+
     /** Sistem ayarı okur (bot_sistem_ayarlari). */
     public static function ayar(PDO $db, string $ad, ?string $varsayilan = null): ?string {
         $stmt = $db->prepare("SELECT ayar_degeri FROM bot_sistem_ayarlari WHERE ayar_adi = ?");

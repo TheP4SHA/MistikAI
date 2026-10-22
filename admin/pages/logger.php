@@ -53,6 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ogret
     }
 
     if ($eklenen > 0) {
+        Panel::kuralOnbelleginiTemizle();
         Panel::json(['success' => true, 'message' => "$eklenen kelime başarıyla öğretildi! ($esgecilen zaten vardı)"]);
     }
     Panel::json(['success' => false, 'message' => 'Yazdığınız kelimeler zaten bu modülde kayıtlı!']);
@@ -134,7 +135,8 @@ function loggerUrl(array $degisen): string {
 function renderLogRow(array $log, bool $is_main, int $group_id, int $log_count = 1): void {
     $e = [Guvenlik::class, 'e'];
     $is_success = (int)$log['anlasildi_mi'] === 1;
-    $bot_cevabi = $log['bot_cevabi'] !== null ? trim(strip_tags($log['bot_cevabi'])) : 'Cevap loglanmadı.';
+    // bot_cevabi düz metindir (içinde "<script>" bile yazı olarak geçebilir): yalnız kaçışlanır, asla ham basılmaz.
+    $bot_cevabi = $log['bot_cevabi'] !== null ? trim($log['bot_cevabi']) : 'Cevap loglanmadı.';
     if (mb_strlen($bot_cevabi, 'UTF-8') > 120) {
         $bot_cevabi = mb_substr($bot_cevabi, 0, 120, 'UTF-8') . '...';
     }
