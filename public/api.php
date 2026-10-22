@@ -86,8 +86,9 @@ if (isset($input['message']) || isset($input['payload'])) {
         'plugin_dir'    => __DIR__ . '/../modules/'
     ]);
 
-    $proc = !empty($input['payload']) ? $input['payload'] : $input['message'];
-    echo $engine->process($proc, $proc);
+    // Motor iç cevap nesnesi döndürür; JSON'a burada çevrilir.
+    $cevap = $engine->process((string)($input['message'] ?? ''), isset($input['payload']) ? (string)$input['payload'] : null);
+    echo json_encode($cevap->disaAktar(), JSON_UNESCAPED_UNICODE);
 } else {
     echo json_encode(['reply' => 'System active.']);
 }
