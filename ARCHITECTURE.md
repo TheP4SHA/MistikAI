@@ -104,7 +104,7 @@ The entity and synonym tables (`bot_varliklar`, `bot_varlik_esanlamlilar`) map v
 
 - Groq's OpenAI-compatible chat completions API (`$GROQ_API_KEY`).
 - **Tool calling:** the active modules (plus "show main menu") are offered as tools. A returned tool name is checked against that allow-list before anything runs.
-- **System prompt:** assistant persona, `$OKUL_BILGISI`, the current date, weekday and time (Türkiye), and rules such as never inventing dates, phone numbers or names.
+- **System prompt:** assistant persona, the school name from `$OKUL_BILGISI` (default "Örnek Meslek Yüksekokulu"), the current date, weekday and time (Türkiye), and rules such as never inventing dates, phone numbers or names.
 - **Limits:** `$LLM_MAX_TOKENS` per reply, a short recent chat history, per-request and total timeouts.
 - **Fallback:** on HTTP 429/5xx the request is retried once after a short pause, then `$LLM_YEDEK_MODEL` is tried.
 - **Graceful failure:** without an API key, or when both models fail, the user gets a short "cannot answer right now" message instead of an error.
@@ -118,6 +118,8 @@ Modules are PHP files in `modules/` that receive:
 - `$this` — MistikEngine instance (`$this->db`, `$this->response()`)
 
 Return the value of `$this->response($html, $buttons)`. Module and flow HTML is passed through the allow-list sanitizer (`Guvenlik::temizHtml`) before it reaches the browser.
+
+Some bundled pieces are examples to adapt rather than finished integrations: the campus guide's floor plan (`modules/kampus_rehberi.php`) describes a fictional building, the phonebook (`modules/telefon_rehberi.php`) expects one sample directory API format (`$REHBER_API_URL`, empty = "not configured"), and the scraper parsers in `admin/pages/icerik.php` are written for a sample site structure. Scraper source URLs are empty until set in the admin settings.
 
 ## Logging
 

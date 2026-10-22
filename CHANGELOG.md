@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+Institution-neutral defaults and documentation.
+
+### Changed
+
+- `$OKUL_BILGISI` defaults to the fictional "Örnek Meslek Yüksekokulu". The chat page title, meta description and welcome text now use it, as does the LLM system prompt; an empty value falls back to the example name.
+- The chat page reads `config/db.php` for its settings only. Copy the `MISTIK_YALNIZ_AYAR` guard around the PDO connection from `config/db.php.example` into your `config/db.php` so the page does not open a database connection.
+- `$REHBER_API_URL` is empty by default. Without it the phonebook module replies "Rehber servisi ayarlanmamış." and makes no network call.
+- The scraper source URLs have no built-in defaults and may be left empty in the settings; the scraper then reports that no source is defined. The menu and calendar parsers are documented as example parsers to adapt.
+- The campus guide's floor plan, the phonebook API format and the scraper parsers are described as examples.
+- `database/seed.sql` is clearly sample data for a fictional school: no scraper URLs, placeholder instructor names.
+- README.md and README_TR.md rewritten for a general, self-hostable engine; the setup guide describes the project-folder layout (chat in `public/`, admin in `admin/`).
+- Screenshots retaken from the current UI with sample data.
+
 ## 1.1.0 — 2026-10-22
 
 Existing installations: back up the database, run `database/migrations/2026-10-guvenlik.sql` once and add the new keys from `config/db.php.example` to `config/db.php`. See [Upgrading](README.md#upgrading-an-existing-installation).
