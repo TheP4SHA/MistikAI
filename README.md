@@ -208,6 +208,7 @@ All settings live in `config/db.php` as PHP variables (copy from `config/db.php.
 | `$LLM_MODEL` | `'llama-3.3-70b-versatile'` | Primary Groq model |
 | `$LLM_YEDEK_MODEL` | `'llama-3.1-8b-instant'` | Fallback model when the primary is rate-limited or down |
 | `$LLM_MAX_TOKENS` | `400` | Max tokens per LLM reply |
+| `$LLM_API_URL` | Groq chat completions | Any OpenAI-compatible chat completions endpoint |
 | `$DAKIKA_ISTEK_SINIRI` | `20` | Chat requests per minute per client |
 | `$MESAJ_MAX_UZUNLUK` | `500` | Max characters per chat message |
 | `$LOG_SAKLAMA_GUN` | `180` | Chat logs older than this many days are deleted |

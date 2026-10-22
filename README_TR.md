@@ -155,6 +155,7 @@ Tüm ayarlar `config/db.php` içinde PHP değişkenleri olarak durur (`config/db
 | `$LLM_MODEL` | `'llama-3.3-70b-versatile'` | Birincil Groq modeli |
 | `$LLM_YEDEK_MODEL` | `'llama-3.1-8b-instant'` | Birincil model sınırlandığında ya da çöktüğünde yedek model |
 | `$LLM_MAX_TOKENS` | `400` | LLM cevabı başına en fazla token |
+| `$LLM_API_URL` | Groq chat completions | OpenAI uyumlu herhangi bir sohbet ucu |
 | `$DAKIKA_ISTEK_SINIRI` | `20` | İstemci başına dakikadaki sohbet isteği |
 | `$MESAJ_MAX_UZUNLUK` | `500` | Mesaj başına en fazla karakter |
 | `$LOG_SAKLAMA_GUN` | `180` | Bundan eski sohbet logları silinir (gün) |
